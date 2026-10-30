@@ -16,6 +16,7 @@ from starlette.requests import Request
 RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
 
+import answers  # noqa: E402
 import claims  # noqa: E402
 import config  # noqa: E402
 from app import ClaimIntakeAgent  # noqa: E402
@@ -23,6 +24,7 @@ from app import ClaimIntakeAgent  # noqa: E402
 ADJUSTER, FROM = "+15550142", "+15550143"
 FNOL = {"policy_number": "POL-0101", "incident_date": "October 28", "location": "Main and 3rd",
         "description": "Rear-ended at a red light", "injuries": False}
+CLEAN = {**FNOL, "incident_date": answers.check_incident_date("October 28")[0]}  # ISO, past
 SCHEMA = json.loads(config.CLAIM_SCHEMA_FILE.read_text())
 
 
@@ -78,7 +80,7 @@ def test_submit_writes_a_claim_matching_the_schema(agent):
     claim = claims.get("CL-0001")
     assert jsonschema_rs.validator_for(SCHEMA).is_valid(claim)
     assert claim["status"] == "awaiting_adjuster" and claim["caller"] == "+15550100"
-    assert {k: claim[k] for k in claims.FIELDS} == FNOL
+    assert {k: claim[k] for k in claims.FIELDS} == CLEAN
 
 
 def test_schema_rejects_a_bad_record():
@@ -116,7 +118,8 @@ def test_briefing_swml_is_built_from_the_claim_fields(agent):
 
 def test_submit_with_missing_fields_does_not_file(agent):
     result = agent.submit_claim({}, raw({"fnol": {**FNOL, "location": ""}}))
-    assert actions(result) == [] and "location" in result.to_dict()["response"]
+    assert find(actions(result), "set_global_data")[0]["fix_field"] == "location"
+    assert "location" in result.to_dict()["response"] and not find(actions(result), "hold")
     assert claims.load_all() == {}
 
 

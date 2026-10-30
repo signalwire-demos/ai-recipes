@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import jsonschema_rs
 
+import answers
 import config
 
 _validator = jsonschema_rs.validator_for(json.loads(config.CLAIM_SCHEMA_FILE.read_text()))
@@ -50,7 +51,7 @@ def briefing(claim: dict) -> str:
     """What the adjuster hears before deciding. Built only from the claim record."""
     injuries = "Injuries were reported." if claim["injuries"] else "No injuries reported."
     return (f"New first notice of loss, claim {claim['claim_id']}, policy {claim['policy_number']}. "
-            f"Incident on {claim['incident_date']} at {claim['location']}. "
+            f"Incident on {answers.spoken_date(claim['incident_date'])} at {claim['location']}. "
             f"{claim['description']}. {injuries}")
 
 
