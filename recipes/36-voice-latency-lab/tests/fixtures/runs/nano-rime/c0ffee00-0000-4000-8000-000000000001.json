@@ -1,0 +1,144 @@
+{
+ "action": "post_conversation",
+ "call_id": "c0ffee00-0000-4000-8000-000000000001",
+ "call_log": [
+  {
+   "confidence": 0.97,
+   "content": "And what about Sunday?",
+   "end_timestamp": 1793000030000000,
+   "role": "user",
+   "start_timestamp": 1793000028500000,
+   "timestamp": 1793000028500000
+  },
+  {
+   "acoustic_latency": 1120,
+   "audio_latency": 600,
+   "content": "Reply.",
+   "eos_to_push_latency": 450,
+   "latency": 350,
+   "role": "assistant",
+   "stamps_us": {
+    "first_audio": 1793000031120000,
+    "first_token": 1793000030800000,
+    "last_word_end": 1793000030000000,
+    "turn_decided": 1793000030450000
+   },
+   "timestamp": 1793000030000010,
+   "utterance_latency": 430
+  },
+  {
+   "content": "Goodbye!",
+   "latency": 280,
+   "role": "assistant",
+   "timestamp": 1793000099000000
+  }
+ ],
+ "conversation_type": "voice",
+ "global_data": {
+  "lab_config": "nano-rime"
+ },
+ "post_prompt_data": {
+  "parsed": [
+   {
+    "answered_hours": true
+   }
+  ],
+  "raw": "{\"answered_hours\": true}"
+ },
+ "raw_call_log": [
+  {
+   "content": "You answer the phone for Example Hardware.",
+   "role": "system",
+   "timestamp": 1793000000000000
+  },
+  {
+   "confidence": 0.97,
+   "content": "Hi, are you open on Saturday?",
+   "end_timestamp": 1793000015000000,
+   "role": "user",
+   "start_timestamp": 1793000013500000,
+   "timestamp": 1793000013500000
+  },
+  {
+   "acoustic_latency": 950,
+   "audio_latency": 520,
+   "content": "",
+   "eos_to_push_latency": 400,
+   "latency": 300,
+   "role": "assistant",
+   "stamps_us": {
+    "first_audio": 1793000015950000,
+    "first_token": 1793000015700000,
+    "last_word_end": 1793000015000000,
+    "turn_decided": 1793000015400000
+   },
+   "timestamp": 1793000015000010,
+   "tool_calls": [
+    {
+     "function": {
+      "arguments": "{\"day\":\"saturday\"}",
+      "name": "check_hours"
+     },
+     "id": "call_1",
+     "type": "function"
+    }
+   ],
+   "utterance_latency": 380
+  },
+  {
+   "content": "saturday: open 10:00 to 14:00",
+   "execution_latency": 42,
+   "function_latency": 55,
+   "function_name": "check_hours",
+   "role": "tool",
+   "timestamp": 1793000015900000,
+   "tool_call_id": "call_1"
+  },
+  {
+   "acoustic_latency": 2350,
+   "audio_latency": 820,
+   "content": "We're open ten to two on Saturday.",
+   "eos_to_push_latency": 400,
+   "latency": 500,
+   "role": "assistant",
+   "stamps_us": {
+    "first_audio": 1793000017350000,
+    "first_token": 1793000015900000,
+    "last_word_end": 1793000015000000,
+    "turn_decided": 1793000015400000
+   },
+   "timestamp": 1793000015000010,
+   "utterance_latency": 600
+  },
+  {
+   "confidence": 0.97,
+   "content": "And what about Sunday?",
+   "end_timestamp": 1793000030000000,
+   "role": "user",
+   "start_timestamp": 1793000028500000,
+   "timestamp": 1793000028500000
+  },
+  {
+   "acoustic_latency": 1120,
+   "audio_latency": 600,
+   "content": "Reply.",
+   "eos_to_push_latency": 450,
+   "latency": 350,
+   "role": "assistant",
+   "stamps_us": {
+    "first_audio": 1793000031120000,
+    "first_token": 1793000030800000,
+    "last_word_end": 1793000030000000,
+    "turn_decided": 1793000030450000
+   },
+   "timestamp": 1793000030000010,
+   "utterance_latency": 430
+  },
+  {
+   "content": "Goodbye!",
+   "latency": 280,
+   "role": "assistant",
+   "timestamp": 1793000099000000
+  }
+ ]
+}

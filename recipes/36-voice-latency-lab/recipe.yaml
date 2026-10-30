@@ -1,0 +1,11 @@
+id: 36-voice-latency-lab
+title: AI Voice Latency Lab
+group: D
+capability: [voice, ai-agent, analytics]
+language: python
+difficulty: advanced
+size: L
+status: confirm
+primitives: [dynamic-config, set_prompt_llm_params, add_language, post_prompt, contexts-steps, set_functions, valid_steps, global_data]
+channels: [voice]
+external: []
