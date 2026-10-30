@@ -87,13 +87,15 @@ What to try on the call (with the default hours in `config.py`):
 - "Monday at 7." Rejected: closed on Mondays.
 - "Friday at 10:30 at night." Rejected: the last seating is an hour before close.
 
-Live-tested 2026-10-30, inbound call `5f144886-e4b7-4afa-ac7c-74c789de4969` (112 s, scripted
-caller). The caller asked for four on Saturday at 11:30 PM. `book_table` returned "On Saturdays we
-seat from 12:00 until 22:00" with no actions, so the call stayed in `take_booking` and the agent
-asked for another time. At 8 PM the handler wrote `R-0641` to `data/runtime/reservations.json`,
-and the platform logged `take_booking -> confirmed (webhook_action)`. The agent then read the
-booking and code back from `global_data`. The model read the details back and waited for a yes
-before it called `book_table`. That is fine, but a script that doesn't say yes stalls there.
+Live-tested 2026-10-30, inbound call `05c5722c-7a21-4c2c-9351-06aeeacb0f18` (84 s, scripted
+caller, current code). The caller asked for four on Saturday at 11:30 PM. `book_table` returned
+"On Saturdays we seat from 12:00 until 22:00" with no actions, so the call stayed in
+`take_booking` and the agent asked for another time. At 8 PM the handler wrote `R-6565` to
+`data/runtime/reservations.json`, and the platform logged `take_booking -> confirmed
+(webhook_action)`. The agent read the booking and code back from `global_data` and hung up once.
+An earlier call, `5f144886-e4b7-4afa-ac7c-74c789de4969`, made before `confirmed` declared
+`valid_steps=[]` and `end`, had the same result. The model sometimes reads the details back and
+waits for a yes before it calls `book_table`, so a scripted caller should be ready to say yes.
 
 ## Deploy
 
