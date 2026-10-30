@@ -27,6 +27,27 @@ def spoken(depart: str) -> str:
     return f"{when:%B} {when.day} at {when:%H:%M}"
 
 
+def money(amount: int) -> str:
+    """Spoken price: '1180 dollars'. No '$' in text the platform speaks or the model reads."""
+    return f"{amount} dollars"
+
+
+def caller_spoke_after(raw_data: dict, function: str):
+    """True if the caller said something after `function` last ran, False if not, None if the
+    platform didn't post the conversation (swaig_post_conversation is set on the booking desk)."""
+    log = raw_data.get("raw_call_log") or raw_data.get("call_log")
+    if not isinstance(log, list):
+        return None
+    ran = None
+    for i, entry in enumerate(log):
+        calls = [c.get("function", {}).get("name") for c in entry.get("tool_calls") or []]
+        if entry.get("function_name") == function or function in calls:
+            ran = i
+    if ran is None:
+        return False
+    return any(e.get("role") == "user" and str(e.get("content") or "").strip() for e in log[ran + 1:])
+
+
 def agent_url(agent: AgentBase, route: str, token: str) -> str:
     """Transfer target with basic auth, so the platform can fetch the other agent's SWML."""
     user, password = agent.get_basic_auth_credentials()[:2]
@@ -66,8 +87,12 @@ class ConciergeDesk(AgentBase):
                    else "Nothing was booked.")
         # Written here from the stored fields; the booking agent's conversation never crosses over.
         agent.prompt_add_section("Returning caller", f"The caller is back from the booking desk. Trip: "
-                                 f"{record['summary']} {outcome} Greet them, confirm that outcome in one "
-                                 "sentence, and ask if there's anything else.")
+                                 f"{record['summary']} {outcome} You already welcomed them back with that "
+                                 "outcome and asked if there's anything else. Don't repeat it. That booking "
+                                 "is finished: there's nothing to confirm or finalize. If they're done, thank "
+                                 "them and say goodbye. Call handoff_to_booking only for a new trip.")
+        # The platform speaks this verbatim, so the outcome the caller hears comes from code.
+        agent.set_param("static_greeting", f"Welcome back. {outcome} Is there anything else I can help with?")
 
     def _find(self, name):
         key = str(name or "").strip().lower()
@@ -122,32 +147,63 @@ class BookingDesk(AgentBase):
             f"You are the booking desk at {config.AGENCY_NAME}. The concierge handed this caller "
             "to you with this note: ${global_data.summary} Don't re-ask anything in the note.",
         )
-        self.set_global_data({"summary": "No handoff on file.", "trip": None})
+        self.set_global_data({"summary": "No handoff on file.", "trip": None, "options_read": "none."})
         self.set_prompt_llm_params(model=config.BOOKING_MODEL)
         ctx = self.define_contexts().add_context("default")
+        # The options are spoken by the platform (static_greeting from from_handoff, say() in
+        # search_flights), never paraphrased by the model, so the caller always hears them.
         ctx.add_step("choose") \
-            .set_text("Greet the caller and confirm the trip in the note. Call search_flights and read "
-                      "the numbered options. When they pick one, call hold_flight with its number. If there's no trip on file, "
-                      "or they want to go back, call return_to_concierge.") \
+            .set_text("The caller has just heard these flight options: ${global_data.options_read} "
+                      "Wait for them to pick one, then call hold_flight with its number. Don't ask for a "
+                      "departure city or anything else in the note. If they want the options again, call "
+                      "search_flights. If there's no trip on file, or they want to go back, call "
+                      "return_to_concierge.") \
             .set_functions(["search_flights", "hold_flight", "return_to_concierge"]) \
             .set_valid_steps([])
         ctx.add_step("done") \
-            .set_text("Read back the hold: ${global_data.booking.readback}. When the caller is done, "
-                      "call return_to_concierge.") \
-            .set_functions(["return_to_concierge"])
+            .set_text("The hold was read back and the caller was asked if they need anything else. Wait "
+                      "for their answer. Only after they say they're done, call return_to_concierge.") \
+            .set_functions(["return_to_concierge"]) \
+            .set_valid_steps([])
+        # Posts the conversation with each SWAIG call: return_to_concierge checks the caller answered.
+        self.set_param("swaig_post_conversation", True)
         self.set_dynamic_config_callback(self.from_handoff)
 
     def from_handoff(self, query_params, body_params, headers, agent):
         """Rebuild global_data from the one-time handoff record named in the transfer URL."""
         token = query_params.get("h")
         record = handoff.claim(token)
-        if record:
-            agent.set_global_data({"handoff_id": token, "summary": record["summary"], "trip": record["trip"],
-                                   "looked_up": record.get("looked_up") or []})
+        if not record:
+            return
+        trip = record["trip"]
+        options = self._numbered(trip)
+        agent.set_global_data({"handoff_id": token, "summary": record["summary"], "trip": trip,
+                               "looked_up": record.get("looked_up") or [], "options": options,
+                               "options_read": self._read(options, trip) or "none."})
+        # The destination, party and dates are known from the handoff, so the options are known
+        # before the AI starts. The platform reads them verbatim as the opening line.
+        party = f"{trip['travelers']} traveler{'s' if trip['travelers'] > 1 else ''}"
+        opening = f"Hi, this is the booking desk. I have {party} to {trip['destination_name']}. "
+        if options:
+            opening += f"{self._read(options, trip)} Which option would you like?"
+        else:
+            opening += (f"I don't have a flight with {trip['travelers']} seats right now. "
+                        "I can take you back to the concierge.")
+        agent.set_param("static_greeting", opening)
+        agent.set_param("static_greeting_no_barge", True)
 
     def _options(self, trip):
         flights = self.destinations[trip["destination"]]["flights"]
         return [f for f in flights if f["seats"] >= trip["travelers"]]
+
+    def _numbered(self, trip):
+        """Code numbers the bookable flights; the model only ever sees and picks a number."""
+        return {str(n): f for n, f in enumerate(self._options(trip), 1)}
+
+    @staticmethod
+    def _read(options, trip):
+        return " ".join(f"Option {n}: departing {spoken(f['depart'])}, {money(f['price'] * trip['travelers'])} "
+                        f"total for {trip['travelers']}." for n, f in options.items())
 
     @AgentBase.tool(name="search_flights", description="List flights for the trip in the handoff.",
                     parameters={"type": "object", "properties": {}})
@@ -155,16 +211,17 @@ class BookingDesk(AgentBase):
         trip = (raw_data.get("global_data") or {}).get("trip")
         if not trip:
             return FunctionResult("There's no trip on file. Offer to go back to the concierge.")
-        flights = self._options(trip)
-        if not flights:
-            return FunctionResult(f"No flights to {trip['destination_name']} have {trip['travelers']} seats.")
-        # Code numbers the results and keeps them; the model only ever sees and picks an option number.
-        options = {str(n): f for n, f in enumerate(flights, 1)}
-        lines = " ".join(f"Option {n}: departing {spoken(f['depart'])}, ${f['price'] * trip['travelers']} "
-                         f"total for {trip['travelers']}." for n, f in options.items())
-        return FunctionResult(f"These are all the flights we have. {lines} Read these options to the "
-                              "caller, then call hold_flight with the option number the caller picks.") \
-            .update_global_data({"options": options})
+        options = self._numbered(trip)
+        if not options:
+            return FunctionResult(f"No flights to {trip['destination_name']} have {trip['travelers']} seats. "
+                                  "Offer to go back to the concierge.")
+        lines = self._read(options, trip)
+        # say(): the platform speaks the options verbatim. The step text carries them for the model
+        # (${global_data.options_read}). Keep this response short: on live calls 55b18265 and
+        # cc96320f the platform logged longer tool results as empty, and the model then guessed.
+        return FunctionResult("Options read aloud. Wait for the pick, then call hold_flight.") \
+            .say(f"{lines} Which option would you like?") \
+            .update_global_data({"options": options, "options_read": lines})
 
     @AgentBase.tool(name="hold_flight", description="Hold seats on one option from search_flights.",
                     parameters={"type": "object", "required": ["option"], "properties": {
@@ -185,17 +242,25 @@ class BookingDesk(AgentBase):
         booking = {"ref": f"R-{(gd.get('handoff_id') or 'direct')[:6].upper()}", "flight_id": flight_id,
                    "travelers": trip["travelers"], "total": total,
                    "readback": f"{trip['travelers']} seats on {flight_id} to {trip['destination_name']}, "
-                               f"departing {spoken(flight['depart'])}, ${total} total"}
+                               f"departing {spoken(flight['depart'])}, {money(total)} total"}
         config.BOOKINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with config.BOOKINGS_FILE.open("a") as f:
             f.write(json.dumps({"call_id": raw_data.get("call_id"), **booking}) + "\n")
-        return FunctionResult(f"Held: {booking['readback']}.") \
+        # The readback and the "anything else?" question are spoken by the platform. The done step
+        # then waits: return_to_concierge refuses until the caller has answered.
+        return FunctionResult(f"Held {flight_id}, read back already. Wait for the caller's answer.") \
+            .say(f"Done. I've held {booking['readback']}, reference {booking['ref']}. "
+                 "Is there anything else you need for this booking?") \
             .update_global_data({"booking": booking}).swml_change_step("done")
 
     @AgentBase.tool(name="return_to_concierge", description="Send the caller back to the concierge.",
                     parameters={"type": "object", "properties": {}})
     def return_to_concierge(self, args, raw_data):
         gd = raw_data.get("global_data") or {}
+        if gd.get("booking") and caller_spoke_after(raw_data, "hold_flight") is False:
+            # Code, not the prompt: no hand-back in the same breath as the hold.
+            return FunctionResult("The caller hasn't answered yet. Wait for them to say they're done, "
+                                  "then call return_to_concierge.")
         # A fresh one-time token: structured summary + booking result, never the transcript.
         token = handoff.save({"call_id": raw_data.get("call_id"), "looked_up": gd.get("looked_up") or [],
                               "summary": gd.get("summary") or "No trip on file.", "booking": gd.get("booking")})
