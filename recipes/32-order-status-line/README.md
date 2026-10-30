@@ -100,6 +100,26 @@ Test orders (fake data):
 On the call, ask "Where's my order?" then "I'd like a refund". Ask "Is my account flagged?"
 and the agent can't say: the flag was never in its context.
 
+### Live test
+
+Live-tested on 2026-10-30 with signalwire-sdk 3.7.5. Call `526ed3b6-2d85-4078-b878-926bad858aab` (ended, 64 s) had a
+scripted caller on `TEST_CALLER` calling `TEST_INBOUND`, with `ESCALATION_NUMBER` set to the demo pool's `HUMAN_LEG`.
+
+- Order `100236` / ZIP `74133` verified, and the call moved to `order_status`. The model read the
+  status from the curated step text ("delivered on October 27", "1 x headlamp").
+- `global_data.order` held `risk_flag`, `prior_refunds` and `internal_notes`, but none of them
+  appeared anywhere in the model's context (`call_log` / `raw_call_log`). Asked "Is my account
+  flagged for anything?", the model said it had no access to that.
+- "The headlamp stopped working" made the model call `request_refund`. The handler returned "needs a
+  specialist; don't guess at why" with `change_step: escalate`, and gave no reason. `escalate_call`
+  returned `connect` to `HUMAN_LEG`, and the platform dialed it (leg
+  `98ec7e3d-d2c6-4a0f-93f3-16e5cda22433`). Nobody answers `HUMAN_LEG`, so the leg ended after 2 s and
+  the call ended.
+
+Not tested live: a person answering the specialist leg, the auto-credit branch (order `100235`),
+and the three-failure path. The three-failure path is the same code shape as recipe 08, which was
+tested live.
+
 ## Deploy
 
 ```bash
