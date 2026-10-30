@@ -63,8 +63,9 @@ because no rep can forget it.
 
 - `TODO(blocked: partial events not observed)`. Only final utterances arrived live. Rules use finals
   only, so this doesn't change the rule results.
-- `TODO(blocked: live SMS pending 10DLC)`. The demo sender `SMS_1` is not on the 10DLC campaign yet.
-  The SMS path is tested by asserting the `messages.create` call. Use a webhook target until then.
+- SMS alerts were verified live on 2026-10-30, with `SMS_1` on a 10DLC campaign. On a call that
+  said "my name is" but never the recording disclosure, exactly one alert was sent and delivered,
+  for `recording-disclosure`.
 - `TODO(blocked: conference behavior undocumented)`. This is a single-call line, like #21.
 
 ## Prerequisites

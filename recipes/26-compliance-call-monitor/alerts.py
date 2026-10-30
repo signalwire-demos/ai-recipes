@@ -42,7 +42,6 @@ class AlertSender:
         log.warning(alert.message())
         try:
             if self.channel() == "sms":
-                # TODO(blocked: live SMS pending 10DLC). SMS_1 is not on the campaign yet.
                 self.sms_client_factory().messages.create(
                     to=self.target, from_=self.from_number, body=alert.message())
             elif self.channel() == "webhook":
