@@ -70,9 +70,12 @@ sequenceDiagram
 
 The `/sms` handler to AI Chat path was verified live on 2026-10-30 (real `AIChatClient.chat`
 turns through a tunnel, tools called with `conversation_type: chat`).
-TODO(blocked: needs live verification) A real text on a number has not been tested: binding a
-number's messaging to the webhook isn't verified from the SDK, and `SMS_1` is not on the 10DLC
-campaign yet (NUMBERS.md).
+Texts from your own SMS number (`SMS_1`, or any number texting itself) get no reply, so
+the agent can't loop on its own answers. On 2026-10-30, with `SMS_1` on
+a 10DLC campaign, a simulated cXML POST to `/sms` from a guest number ran `verify_guest` and
+`amenity_hours` over AI Chat, and its `<Message>` text, sent from `SMS_1`, was delivered.
+TODO(blocked: needs live verification) A handset texting `SMS_1` has not been tested: our other
+numbers aren't on a campaign, so carriers reject their texts to `SMS_1`.
 
 ## Setup
 

@@ -42,6 +42,8 @@ REQUESTS_FILE = Path(os.environ.get("REQUESTS_FILE", HERE / "data" / "requests.j
 # --- Channels ---------------------------------------------------------------
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 SMS_ROUTE = "/sms"
+# Our SMS number (demo pool: SMS_1). Texts from it are never answered, so a reply can't loop.
+SMS_NUMBER = os.environ.get("SMS_NUMBER") or os.environ.get("SMS_1", "")
 # The URL the AI Chat service fetches this agent's SWML from. Empty: built from
 # PUBLIC_URL plus the basic auth credentials, i.e. the same URL a voice call uses.
 CHAT_CONFIG_URL = os.environ.get("CHAT_CONFIG_URL", "")
