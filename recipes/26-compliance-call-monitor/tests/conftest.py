@@ -15,8 +15,9 @@ def meeting_events():
 
 
 @pytest.fixture
-def other_shapes():
-    return json.loads((FIXTURES / "other-shapes.json").read_text())
+def partial_events():
+    """SYNTHETIC: partial results were not observed on a live call (see adapter.py)."""
+    return [json.loads(line) for line in (FIXTURES / "partials-synthetic.jsonl").read_text().splitlines()]
 
 
 @pytest.fixture(autouse=True)

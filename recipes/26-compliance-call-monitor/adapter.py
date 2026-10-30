@@ -1,18 +1,24 @@
 """The ONE place that knows the shape of a live_transcribe webhook body.
 
-TODO(blocked: payload undocumented). The SWML docs say only that "partial results are sent
-as they occur" when live_events is on. No source gives field names for the text, the leg,
-the partial/final flag or the timestamp. Until a live call confirms the shape:
-  * every raw body is stored untouched (consumer.py, <call>.raw.jsonl), and
-  * this adapter tries the candidate field names below, in order.
-The candidates come from the closest documented SignalWire callback (ai_sidecar: a
-`call_info` envelope with `call_id`, an event object with `type` and a `ts` in
-microseconds) plus the field names the default engine (Deepgram) uses (`transcript`,
-`is_final`, `speech_final`, `channel`). When a real body is captured, delete the guesses
-and keep the fields that are actually there.
+The SWML docs don't publish this payload. The shape below was captured from a live call on
+2026-10-30 (smoke call 30f79d23-dfb5-466c-84cc-e31255f778e1, inbound leg 646b6018-...,
+`live_events: true`, deepgram):
+
+  {"call_info": {"call_id": ..., "project_id": ..., "space_id": ...},
+   "channel_data": {"content_disposition": "transcribe.utterance", "call_answer_date": <us>, ...},
+   "confidence": 0.99,
+   "utterance": {"role": "remote-caller" | "local-caller", "content": "text", "lang": "en-US",
+                 "timestamp": <microseconds>, "utterance_id": "<uuid>", "confidence": 0.99, ...}}
+
+At hangup, one more body arrives with content_disposition "transcribe.conversation_log" and
+a full `conversation_log` list instead of `utterance`. This consumer ignores it, because
+every line in it already arrived live (the raw body is still stored).
+
+Every utterance in the capture was a FINAL result. TODO(blocked: partial events not
+observed). No partial result arrived, so the partial path (an utterance with
+`"is_final": false`, merged by utterance_id) is untested against the platform.
 """
 from dataclasses import asdict, dataclass
-from datetime import datetime
 
 
 @dataclass
@@ -21,9 +27,10 @@ class Segment:
     speaker: str
     text: str
     is_final: bool
-    ts: float            # when the speech happened (epoch seconds), per the platform
+    ts: float            # when the utterance happened (epoch seconds), per the platform
     received_at: float   # when this consumer received it (epoch seconds)
     segment_id: str = ""
+    answered_at: float = 0.0  # when the platform answered the call (epoch seconds), 0 if unknown
 
     @property
     def delay_ms(self) -> int:
@@ -33,65 +40,35 @@ class Segment:
         return {**asdict(self), "delay_ms": self.delay_ms}
 
 
-EVENT_KEYS = ("transcribe_event", "transcription", "event", "params", "data")
-TEXT_KEYS = ("text", "transcript", "utterance", "content")
-SPEAKER_KEYS = ("direction", "speaker", "channel", "leg", "role")
-TS_KEYS = ("ts", "timestamp", "event_time", "time", "start_time")
-
-
-def _first(obj: dict, keys):
-    return next((obj[k] for k in keys if obj.get(k) not in (None, "")), None)
-
-
-def _epoch_seconds(value, fallback: float) -> float:
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-        except ValueError:
-            return fallback
-    if not isinstance(value, (int, float)):
-        return fallback
-    if value > 1e14:      # microseconds (ai_sidecar documents ts in microseconds)
-        return value / 1e6
-    if value > 1e11:      # milliseconds
-        return value / 1e3
-    return float(value)
-
-
 def call_id_of(body) -> str:
     if not isinstance(body, dict):
         return "unparsed"
-    info = body.get("call_info") if isinstance(body.get("call_info"), dict) else {}
-    return str(info.get("call_id") or body.get("call_id") or "unparsed")
+    for envelope in ("call_info", "channel_data"):
+        if isinstance(body.get(envelope), dict) and body[envelope].get("call_id"):
+            return str(body[envelope]["call_id"])
+    return "unparsed"
 
 
-def parse_event(body: dict, received_at: float) -> list[Segment]:
-    """Turn one webhook body into zero or more Segments. Never raises on odd input."""
-    if not isinstance(body, dict):
+def parse_event(body, received_at: float) -> list[Segment]:
+    """Turn one webhook body into zero or one Segment. Never raises on odd input."""
+    utt = body.get("utterance") if isinstance(body, dict) else None
+    if not isinstance(utt, dict):
+        return []        # conversation_log at hangup, or something new: raw body is kept
+    text = str(utt.get("content") or "").strip()
+    if not text:
         return []
-    call_id = call_id_of(body)
-    event = next((body[k] for k in EVENT_KEYS if isinstance(body.get(k), dict)), body)
-    items = event.get("segments") or event.get("results") or [event]
-    out = []
-    for item in items if isinstance(items, list) else [items]:
-        if not isinstance(item, dict):
-            continue
-        text = _first(item, TEXT_KEYS)
-        alts = item.get("alternatives")
-        if text is None and isinstance(alts, list) and alts and isinstance(alts[0], dict):
-            text = alts[0].get("transcript")
-        if not text or not str(text).strip():
-            continue
-        kind = str(item.get("type") or item.get("status") or "").lower()
-        is_final = bool(item.get("is_final") or item.get("final") or item.get("speech_final")
-                        or kind in ("final", "complete", "completed"))
-        out.append(Segment(
-            call_id=str(item.get("call_id") or call_id),
-            speaker=str(_first(item, SPEAKER_KEYS) or "unknown"),
-            text=str(text).strip(),
-            is_final=is_final,
-            ts=_epoch_seconds(_first(item, TS_KEYS), received_at),
-            received_at=received_at,
-            segment_id=str(item.get("segment_id") or item.get("utterance_id") or ""),
-        ))
-    return out
+    stamp = utt.get("timestamp")
+    ts = stamp / 1e6 if isinstance(stamp, (int, float)) and stamp > 0 else received_at
+    channel = body.get("channel_data") if isinstance(body.get("channel_data"), dict) else {}
+    answered = channel.get("call_answer_date")
+    answered_at = answered / 1e6 if isinstance(answered, (int, float)) and answered > 0 else 0.0
+    return [Segment(
+        call_id=call_id_of(body),
+        speaker=str(utt.get("role") or "unknown"),
+        text=text,
+        is_final=utt.get("is_final") is not False,   # every captured utterance was final
+        ts=ts,
+        received_at=received_at,
+        segment_id=str(utt.get("utterance_id") or ""),
+        answered_at=answered_at,
+    )]

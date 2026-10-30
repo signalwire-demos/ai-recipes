@@ -18,8 +18,8 @@ never sends a second alert. `GET /calls/<call_id>/compliance` shows each rule as
 
 Compliance is enforced by code, not judged by a model. The rules are plain phrase matches on final
 transcript segments (`rules.py`). A phrase counts by the time it was spoken (the segment's `ts`),
-not by when its webhook arrived. Each call's clock starts when the platform fetches the SWML
-(`ComplianceLine.on_request`). Deadlines are checked on a ticker, so a rep who says nothing still
+not by when its webhook arrived. Each call's clock starts when the platform answered the call
+(`channel_data.call_answer_date`, carried in every transcript event). Deadlines are checked on a ticker, so a rep who says nothing still
 triggers the alert. Each (call, rule) pair settles once, so the supervisor is never paged twice.
 The call flow underneath is code too: `live_transcribe` starts right after `answer` and before
 `connect`, so the whole disclosure window is transcribed. The SWML has no `ai` verb, and the
@@ -29,7 +29,7 @@ copied in so this folder stands alone.
 ```mermaid
 stateDiagram-v2
     [*] --> answer
-    answer --> live_transcribe: SWML fetch starts the compliance clock (on_request)
+    answer --> live_transcribe: call_answer_date starts the compliance clock
     live_transcribe --> connect: MEETING_BRIDGE_NUMBER set (your rep)
     live_transcribe --> dictation: not set (test line)
     connect --> hangup
@@ -45,19 +45,24 @@ stateDiagram-v2
 | Primitive | Where |
 |---|---|
 | `SWMLService` + `live_transcribe` (before `connect`) | `app.py`, `build_swml()` |
-| Call clock from the SWML fetch | `app.py`, `ComplianceLine.on_request` |
+| Call clock from the platform's answer time | `adapter.py` (`answered_at`), `rules.py` (`observe`) |
 | Every segment to the rules | `app.py`, `MonitoredBroker.publish` |
 | Deterministic rules, exactly-once settle, grace period | `rules.py`, `ComplianceMonitor` |
 | Deadline ticker | `app.py`, `create_app()` lifespan |
 | SMS alert (`client.messages.create`) or webhook | `alerts.py`, `AlertSender.send` |
 | Payload adapter (the one place that knows the event shape) | `adapter.py`, `parse_event()` |
 
-### What is not confirmed yet
+### The event payload and what is not confirmed yet
 
-- `TODO(blocked: payload undocumented)`. The live_transcribe webhook body has no published schema.
-  The fixtures in `data/fixtures/` are a best guess (see `adapter.py`). It is also unconfirmed that
-  the events carry the same `call_id` as the SWML request. If they don't, the clock falls back to
-  the first transcribed segment, which can start the window late.
+`adapter.py` reads the payload captured from a live call on 2026-10-30 (see #21). There is one
+final `utterance` per spoken sentence, with `role` (leg), `content`, and `timestamp` (µs). The
+envelope carries `call_answer_date`. Audio played by the SWML is transcribed too, as
+`local-caller`. A disclosure you play with `play` (for example, put "This call is recorded." in
+`GREETING` in `config.py`) passes the rule on its own. That is the strongest form of compliance,
+because no rep can forget it.
+
+- `TODO(blocked: partial events not observed)`. Only final utterances arrived live. Rules use finals
+  only, so this doesn't change the rule results.
 - `TODO(blocked: live SMS pending 10DLC)`. The demo sender `SMS_1` is not on the 10DLC campaign yet.
   The SMS path is tested by asserting the `messages.create` call. Use a webhook target until then.
 - `TODO(blocked: conference behavior undocumented)`. This is a single-call line, like #21.

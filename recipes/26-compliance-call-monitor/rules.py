@@ -48,7 +48,7 @@ class ComplianceMonitor:
 
     def observe(self, seg: Segment) -> None:
         """Feed one segment. Only final segments said before the deadline can pass a rule."""
-        self.start_call(seg.call_id, seg.ts)  # fallback clock when the SWML fetch wasn't seen
+        self.start_call(seg.call_id, seg.answered_at or seg.ts)  # platform answer time, else first words
         if not seg.is_final:
             return
         text = normalize(seg.text)
