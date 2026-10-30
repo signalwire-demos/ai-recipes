@@ -7,6 +7,7 @@ the model's change_context tool only offers the routes config.DEPARTMENTS allows
 The refund amount comes from the invoice record, never from the model.
 """
 import json
+import re
 import time
 
 from signalwire import AgentBase, FunctionResult
@@ -21,6 +22,17 @@ def load(path) -> dict:
 def append_jsonl(path, row: dict) -> None:
     with path.open("a") as f:
         f.write(json.dumps(row) + "\n")
+
+
+def invoice_key(spoken) -> str:
+    """Normalize an invoice number the way speech recognition hands it over.
+
+    The live call heard "INV-1001" as "Inv1001"; "inv 1001" and "1001" are just as likely.
+    Keep letters and digits only, then put the dash back: INV1001 -> INV-1001.
+    """
+    raw = re.sub(r"[^A-Z0-9]", "", str(spoken or "").upper())
+    m = re.fullmatch(r"(?:INV)?(\d+)", raw)
+    return f"INV-{m[1]}" if m else raw
 
 
 def refunded_ids() -> set:
@@ -116,7 +128,7 @@ class FrontDeskAgent(AgentBase):
                     "required": ["invoice_id"]},
     )
     def get_invoice(self, args, raw_data):
-        invoice_id = str(args.get("invoice_id", "")).strip().upper()
+        invoice_id = invoice_key(args.get("invoice_id"))
         inv = load(config.INVOICES_FILE).get(invoice_id)
         if not inv:
             return FunctionResult("I can't find that invoice. Ask the caller to read the number again.")
@@ -131,7 +143,7 @@ class FrontDeskAgent(AgentBase):
                     "required": ["invoice_id"]},
     )
     def issue_refund(self, args, raw_data):
-        invoice_id = str(args.get("invoice_id", "")).strip().upper()
+        invoice_id = invoice_key(args.get("invoice_id"))
         inv = load(config.INVOICES_FILE).get(invoice_id)
         if not inv:
             return FunctionResult("I can't find that invoice, so no refund was made.")
