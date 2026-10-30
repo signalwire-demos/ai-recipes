@@ -1,0 +1,11 @@
+id: 24-support-copilot-that-acts
+title: AI Support Copilot That Acts
+group: C
+capability: [voice, ai-agent, swml, transcription]
+language: python
+difficulty: advanced
+size: L
+status: blocked
+primitives: [ai_sidecar, swml-service, swaig-functions, handler-enforced-cap, sidecar-callbacks, connect-verb, server-sent-events]
+channels: [voice, web]
+external: []
