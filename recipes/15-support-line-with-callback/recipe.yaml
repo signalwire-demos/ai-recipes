@@ -1,0 +1,11 @@
+id: 15-support-line-with-callback
+title: AI Support Line With Callback
+group: B
+capability: [voice, ai-agent, outbound, rest, multi-agent]
+language: python
+difficulty: intermediate
+size: M
+status: ready
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, connect, dynamic-config, rest-dial, agent-server]
+channels: [voice]
+external: []
