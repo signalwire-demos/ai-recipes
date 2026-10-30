@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Example Harbor Hotel</title>
+  <style>
+    body { margin: 0; font: 16px/1.5 system-ui, sans-serif; color: #1d2733; background: #f6f7f9; }
+    header { background: #0b5cad; color: #fff; padding: 48px 24px; text-align: center; }
+    header h1 { margin: 0 0 8px; font-size: 2rem; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 96px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    .card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgb(0 0 0 / .08); }
+    .card h3 { margin: 0 0 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Example Harbor Hotel</h1>
+    <p>A sample static site. The chat bubble in the corner is the same concierge that answers the phone.</p>
+  </header>
+  <main>
+    <h2>During your stay</h2>
+    <div class="grid">
+      <div class="card"><h3>Pool</h3><p>Level 3, with towels on deck.</p></div>
+      <div class="card"><h3>Breakfast</h3><p>Served every morning in the Atrium.</p></div>
+      <div class="card"><h3>Spa</h3><p>Massages and treatments. Booking recommended.</p></div>
+    </div>
+    <p>Staying with us? Open the chat and give your room number and last name to request
+      towels, housekeeping, a late checkout or a wake-up call. Try room 412, Rivera.</p>
+  </main>
+
+  <!-- The widget: two script tags. To embed it on another site, use absolute URLs to this app
+       and add that site's origin to CHAT_ALLOWED_ORIGINS. -->
+  <script src="widget-config.js"></script>
+  <script src="widget.js" defer></script>
+</body>
+</html>
