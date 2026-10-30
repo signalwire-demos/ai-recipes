@@ -65,7 +65,9 @@ class BilingualSupportAgent(AgentBase):
             .set_valid_steps(["wrap_up"])
         ctx.add_step("wrap_up") \
             .set_text("Thank the caller and say goodbye in their current language.") \
-            .set_functions([])
+            .set_functions([]) \
+            .set_valid_steps([]) \
+            .set_end(True)
 
     @AgentBase.tool(
         name="lookup_account",
