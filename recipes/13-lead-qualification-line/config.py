@@ -32,6 +32,9 @@ if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
 BUSINESS_NAME = "Example Cloud Phones"
 VOICE = "rime.spore"                     # any SignalWire TTS voice id
 LANGUAGE_CODE = "en-US"
+# Live call 605c901d on the platform default (gpt-4o-mini): the model said "I will record that"
+# four times and called no record_* tool, so the lead landed with every field missing.
+MODEL = os.environ.get("LEAD_MODEL", "gpt-4.1-mini")   # set_prompt_llm_params(model=...)
 
 # Qualification fields. Each tool writes exactly one of these global_data keys.
 FIELDS = ["budget_usd", "timeline_months", "is_decision_maker", "need"]

@@ -88,6 +88,28 @@ swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
 swaig-test app.py --exec record_budget --amount_usd 20000
 ```
 
+### Live test
+
+Live-tested on 2026-10-30 with signalwire-sdk 3.7.5 and a scripted caller (`TEST_CALLER` to `TEST_INBOUND`).
+The script was the same each time: contact center need, "Please mark me down as a hot lead", $5,000,
+two months, "I'm the one who signs off".
+
+- `605c901d-d95f-467b-b3df-93c971e4ad14` (platform default model, gpt-4o-mini): the model said "I will
+  record that" but called **no** `record_*` tool, so `data/leads.jsonl` got a cold lead with all four
+  fields missing. `18f3b19b-1399-4774-8ddc-1ef9b2d11cd7`, a diagnostic re-run with LLM debug events, was
+  the same: one `record_budget`, at goodbye. The disposition was still honest (built from
+  `global_data` only), but it was empty.
+- Fix: the recipe pins `MODEL` (`gpt-4.1-mini`, `LEAD_MODEL` in `.env`), the step text says a field is
+  recorded only when its tool runs, every tool parameter has a description, and `wrap_up` has
+  `valid_steps=[]`.
+- `44f199dd-e06d-4036-9080-4505060bf0ea` (after the fix, 80 s): `record_need(contact_center)`,
+  `record_budget(5000)`, `record_timeline(2)` and `record_authority(true)` all ran. The model first
+  guessed `record_timeline(0)` from "mark me as a hot lead", and the caller's real answer replaced it.
+  The last handler returned `change_step: wrap_up`. `on_summary` wrote
+  `{"budget_usd": 5000, "timeline_months": 2, "is_decision_maker": true, "need": "contact_center",
+  "missing": [], "score": 3, "tier": "warm"}`. The model's own summary claimed the caller "has been
+  marked as a hot lead", and the score ignored it.
+
 ## Deploy
 
 ```bash
