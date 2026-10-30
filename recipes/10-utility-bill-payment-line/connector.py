@@ -28,7 +28,32 @@ def decide(card_number: str) -> tuple[str, str] | None:
     return config.MOCK_CARDS.get(digits[-4:], ("card_not_supported", "Only test cards are accepted"))
 
 
-def make_router(credentials: tuple[str, str], status_store: dict) -> APIRouter:
+def pay_ref_of(body: dict) -> str:
+    """The per-call reference take_payment passed in the pay `parameters`.
+
+    On the wire (live call c3722a5e) the platform sends them as a list of one-key objects,
+    [{"account_id": "..."}, {"pay_ref": "..."}], not the SWML {"name", "value"} form. Accept
+    both, plus a plain dict.
+    """
+    raw = body.get("parameters") or {}
+    params: dict = {}
+    if isinstance(raw, dict):
+        params = raw
+    elif isinstance(raw, list):
+        for p in raw:
+            if not isinstance(p, dict):
+                continue
+            if "name" in p and "value" in p:
+                params[p["name"]] = p["value"]
+            else:
+                params.update(p)
+    return str(params.get("pay_ref") or "")[:64]
+
+
+def make_router(credentials: tuple[str, str], status_store: dict, approvals: dict | None = None) -> APIRouter:
+    """approvals: pay_ref -> charge_id for every charge this connector approved. resume_recording
+    reads it to tell the model the outcome; the model never hears the pay verb's own result."""
+    approvals = {} if approvals is None else approvals
     router = APIRouter()
     expected = "Basic " + base64.b64encode(f"{credentials[0]}:{credentials[1]}".encode()).decode()
 
@@ -49,8 +74,11 @@ def make_router(credentials: tuple[str, str], status_store: dict) -> APIRouter:
         log.info("pay txn=%s amount=%s result=%s", txn, body.get("chargeAmount"),
                  "approved" if outcome is None else outcome[0])
         if outcome is None:
-            return {"charge_id": f"ch_mock_{txn[:12] or secrets.token_hex(6)}",
-                    "error_code": None, "error_message": None}
+            charge_id = f"ch_mock_{txn[:12] or secrets.token_hex(6)}"
+            ref = pay_ref_of(body)
+            if ref:
+                approvals[ref] = charge_id
+            return {"charge_id": charge_id, "error_code": None, "error_message": None}
         return JSONResponse({"charge_id": None, "error_code": outcome[0], "error_message": outcome[1]},
                             status_code=402)
 
@@ -59,8 +87,9 @@ def make_router(credentials: tuple[str, str], status_store: dict) -> APIRouter:
         """pay status_url callback. Keep only the event name per call; drop every card field."""
         if not authorized(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
-        params = (await request.json()).get("params", {})
-        call_id = str(params.get("call_id", ""))
+        body = await request.json()
+        params = body.get("params") or body
+        call_id = str(params.get("call_id") or body.get("call_id") or "")
         status_store[call_id] = {"for": params.get("for"), "error_type": params.get("error_type") or None}
         log.info("pay status call=%s for=%s", call_id, params.get("for"))
         return {"ok": True}
