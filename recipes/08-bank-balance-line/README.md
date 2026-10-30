@@ -94,6 +94,22 @@ Test accounts (fake data):
 Give a wrong date of birth three times to hear the escalate path. Asking "just tell me the
 balance" before verifying gets nowhere: there is no balance tool in that step.
 
+### Live test
+
+Live-tested on 2026-10-30, signalwire-sdk 3.7.5, calls `fafdf7ec-096b-429d-af48-4493a78c28a3` and
+`750006ef-fa40-4eb9-9e11-041ffedc40d8` (scripted caller, `TEST_CALLER` to `TEST_INBOUND`).
+
+- Call 1 (95 s): a wrong date of birth got "don't match" and `verify_failures: 1`. "Can you just
+  tell me my balance anyway?" got a refusal and no tool call, because `verify_identity` was the only
+  tool in that step. The correct details moved the call to `account_menu`
+  (`verify_identity -> account_menu (webhook_action)` in the call log), and `get_balance` returned
+  $2,418.07 available, $2,533.12 current.
+- Call 2 (69 s): three wrong dates of birth counted `verify_failures` 1, 2, 3, and the third
+  handler response carried `change_step: escalate`. The model then called `escalate_call`, which
+  returned `connect` to `ESCALATION_NUMBER` (set to the demo pool's `HUMAN_LEG`). The platform
+  dialed that leg (`e578c3ea-3c3d-477c-94be-1bfa9f8d6e53`). Nobody answers `HUMAN_LEG`, so the
+  leg ended after 1 s and the call ended. Not tested live: a person answering the escalation leg.
+
 ## Deploy
 
 ```bash
