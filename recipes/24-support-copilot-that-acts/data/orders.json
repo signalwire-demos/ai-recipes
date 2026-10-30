@@ -1,0 +1,14 @@
+{
+  "_note": "Mock order backend. Fake customers, fake phone numbers in the 555-01xx range.",
+  "orders": {
+    "A-1001": {"customer": "Dana Reyes", "phone": "+15550111", "status": "delivered",
+               "items": ["Desk lamp", "Bulb 2-pack"], "total": 64.00, "eta": null,
+               "notes": "Customer reported the lamp arrived scratched."},
+    "A-1002": {"customer": "Sam Okafor", "phone": "+15550112", "status": "in_transit",
+               "items": ["Office chair"], "total": 189.00, "eta": "2026-11-04",
+               "notes": "Second shipment; first was lost by the carrier."},
+    "A-1003": {"customer": "Lee Park", "phone": "+15550113", "status": "processing",
+               "items": ["USB-C cable"], "total": 12.00, "eta": "2026-11-06",
+               "notes": ""}
+  }
+}
