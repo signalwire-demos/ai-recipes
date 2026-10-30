@@ -1,0 +1,11 @@
+id: 13-lead-qualification-line
+title: AI Lead Qualification Line
+group: B
+capability: [voice, ai-agent, analytics]
+language: python
+difficulty: intermediate
+size: M
+status: ready
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, post_prompt]
+channels: [voice]
+external: []
