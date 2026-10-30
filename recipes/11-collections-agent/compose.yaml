@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    env_file:
+      - path: .env        # cp .env.example .env first; optional so `docker compose config` works on a clean clone
+        required: false
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+    restart: unless-stopped
