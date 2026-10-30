@@ -188,6 +188,7 @@ def test_governance_steps_and_tools(ai):
     assert sorted(steps["manage"]["functions"]) == [
         "cancel_appointment", "confirm_appointment", "opt_out", "reschedule_appointment"]
     assert steps["wrap_up"]["functions"] == []
+    assert steps["wrap_up"]["valid_steps"] == []  # no next_step tool on the last step
 
 
 def test_governance_no_appointment_details_before_identity(ai):
