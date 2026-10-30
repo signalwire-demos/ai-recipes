@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live captions</title>
+<style>
+  :root { --bg: #111418; --fg: #f4f6f8; --muted: #8a94a0; --accent: #3a7bd5; --warn: #e0a030; --bad: #e05050; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #fafbfc; --fg: #14181c; --muted: #6a737d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 22px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; display: flex; gap: 16px; align-items: baseline;
+           padding: 12px 16px; background: var(--bg); border-bottom: 1px solid #8a94a033;
+           font-size: 14px; color: var(--muted); }
+  header strong { color: var(--fg); font-size: 16px; }
+  #status.live { color: #3fb950; }
+  main { padding: 16px; max-width: 960px; margin: 0 auto; }
+  .seg { margin: 0 0 12px; display: grid; grid-template-columns: 7em 1fr auto; gap: 12px; }
+  .who { color: var(--accent); font-weight: 600; font-size: 16px; padding-top: 4px; }
+  .seg.partial .text { color: var(--muted); font-style: italic; }
+  .seg.final .text { color: var(--fg); }
+  .delay { font: 13px ui-monospace, monospace; color: var(--muted); padding-top: 6px; white-space: nowrap; }
+  .delay.slow { color: var(--warn); }
+  .delay.late { color: var(--bad); }
+  @media (max-width: 560px) { .seg { grid-template-columns: 1fr auto; } .who { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<header>
+  <strong>Live captions</strong>
+  <span id="status">connecting</span>
+  <span>grey = partial, solid = final, ms = delay from speech to this server</span>
+</header>
+<main id="captions" aria-live="polite"></main>
+<script>
+  const SETTINGS = __CAPTION_SETTINGS__;
+  const callId = new URLSearchParams(location.search).get("call_id");
+  const root = document.getElementById("captions");
+  const status = document.getElementById("status");
+  const open = new Map();  // one open (partial) line per call + speaker, or per segment id
+  const shownFinals = new Set();  // an SSE reconnect replays the transcript; draw each final once
+
+  function label(speaker) {
+    return speaker in SETTINGS.labels ? SETTINGS.labels[speaker] : speaker;
+  }
+
+  function render(seg) {
+    const who = label(seg.speaker);
+    if (who === null) return;                       // hidden in config.SPEAKER_LABELS
+    const key = seg.call_id + "|" + (seg.segment_id || seg.speaker);
+    if (seg.is_final) {
+      const id = key + "|" + seg.ts + "|" + seg.text;
+      if (shownFinals.has(id)) return;
+      shownFinals.add(id);
+    }
+    let line = open.get(key);
+    if (!line) {
+      line = document.createElement("p");
+      line.innerHTML = '<span class="who"></span><span class="text"></span><span class="delay"></span>';
+      line.querySelector(".who").textContent = who;
+      root.appendChild(line);
+      while (root.children.length > SETTINGS.maxLines) root.firstElementChild.remove();
+    }
+    line.className = "seg " + (seg.is_final ? "final" : "partial");
+    line.querySelector(".text").textContent = seg.text;
+    const delay = line.querySelector(".delay");
+    delay.textContent = seg.delay_ms + " ms";
+    delay.className = "delay" + (seg.delay_ms > SETTINGS.lateMs ? " late" : seg.delay_ms > SETTINGS.slowMs ? " slow" : "");
+    if (seg.is_final) open.delete(key); else open.set(key, line);
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+
+  const source = new EventSource("/events" + (callId ? "?call_id=" + encodeURIComponent(callId) : ""));
+  source.addEventListener("segment", (e) => render(JSON.parse(e.data)));
+  source.onopen = () => { status.textContent = "live" + (callId ? " · " + callId : " · all calls"); status.className = "live"; };
+  source.onerror = () => { status.textContent = "reconnecting"; status.className = ""; };
+</script>
+</body>
+</html>
