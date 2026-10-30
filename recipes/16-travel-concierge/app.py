@@ -1,13 +1,14 @@
 """Travel concierge: two agents on one server, with a handler-written handoff between them.
 
-Governance point: the concierge can't book and the booking desk can't wander. The concierge
-hands off with swml_transfer(final=False). Its handler writes the handoff (a summary it builds
-from structured fields, plus trip state) to a short-lived store and puts only an opaque token
-in the transfer URL. The booking agent's dynamic config callback rebuilds global_data from that
-record. The booking tools read the destination and party size from global_data, never from
-model arguments. No transcript crosses the handoff.
+Governance point: the concierge can't book and the booking desk can't wander. Each handoff is
+a final swml_transfer to the other agent. The handler writes the handoff (a summary it builds
+from structured fields, plus trip or booking state) to a short-lived store and puts only a
+one-time token in the transfer URL. The receiving agent's dynamic config callback claims that
+record and rebuilds its context. The booking tools read the destination and party size from
+global_data, never from model arguments. No transcript crosses either handoff.
 """
 import json
+from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from signalwire import AgentBase, AgentServer, FunctionResult
@@ -20,12 +21,18 @@ def load_destinations() -> dict:
     return json.loads(config.DESTINATIONS_FILE.read_text())
 
 
-def booking_url(agent: AgentBase, token: str) -> str:
-    """Transfer target with basic auth, so the platform can fetch the booking agent's SWML."""
+def spoken(depart: str) -> str:
+    """'2026-12-11 18:30' -> 'December 11 at 18:30', so the model matches what callers say."""
+    when = datetime.strptime(depart, "%Y-%m-%d %H:%M")
+    return f"{when:%B} {when.day} at {when:%H:%M}"
+
+
+def agent_url(agent: AgentBase, route: str, token: str) -> str:
+    """Transfer target with basic auth, so the platform can fetch the other agent's SWML."""
     user, password = agent.get_basic_auth_credentials()[:2]
     parts = urlsplit(config.PUBLIC_URL)
     netloc = f"{user}:{password}@{parts.netloc}"
-    return urlunsplit((parts.scheme, netloc, config.BOOKING_ROUTE, f"h={token}", ""))
+    return urlunsplit((parts.scheme, netloc, route, f"h={token}", ""))
 
 
 class ConciergeDesk(AgentBase):
@@ -46,6 +53,21 @@ class ConciergeDesk(AgentBase):
             .set_text("Help the caller choose a trip. Hand off to booking when they're ready.") \
             .set_functions(["destination_info", "handoff_to_booking"]) \
             .set_valid_steps([])
+        self.set_dynamic_config_callback(self.from_booking)
+
+    def from_booking(self, query_params, body_params, headers, agent):
+        """A caller coming back from /booking: claim the return record and brief this agent."""
+        record = handoff.claim(query_params.get("h"))
+        if not record:
+            return
+        agent.set_global_data({"looked_up": record.get("looked_up") or [], "booking": record.get("booking")})
+        held = record.get("booking")
+        outcome = (f"The booking desk held {held['readback']}, reference {held['ref']}." if held
+                   else "Nothing was booked.")
+        # Written here from the stored fields; the booking agent's conversation never crosses over.
+        agent.prompt_add_section("Returning caller", f"The caller is back from the booking desk. Trip: "
+                                 f"{record['summary']} {outcome} Greet them, confirm that outcome in one "
+                                 "sentence, and ask if there's anything else.")
 
     def _find(self, name):
         key = str(name or "").strip().lower()
@@ -81,15 +103,13 @@ class ConciergeDesk(AgentBase):
         summary = (f"{travelers} traveler{'s' if travelers > 1 else ''} to {dest['name']} in {month}. "
                    f"Destinations discussed: {', '.join(looked) or key}.")
         token = handoff.save({
-            "call_id": raw_data.get("call_id"), "summary": summary,
+            "call_id": raw_data.get("call_id"), "summary": summary, "looked_up": looked,
             "trip": {"destination": key, "destination_name": dest["name"], "travelers": travelers,
                      "month": month},
         })
+        # final=True: this AI ends and /booking takes the call. return_to_concierge brings it back.
         return FunctionResult("Tell the caller you're connecting them to the booking desk.", post_process=True) \
-            .update_global_data({"handoff_id": token}) \
-            .swml_transfer(booking_url(self, token),
-                           "The caller is back from the booking desk. Ask if there's anything else.",
-                           final=False)
+            .swml_transfer(agent_url(self, config.BOOKING_ROUTE, token), "", final=True)
 
 
 class BookingDesk(AgentBase):
@@ -111,16 +131,18 @@ class BookingDesk(AgentBase):
             .set_functions(["search_flights", "hold_flight", "return_to_concierge"]) \
             .set_valid_steps([])
         ctx.add_step("done") \
-            .set_text("Confirm the hold: ${global_data.booking.readback}. Then call return_to_concierge.") \
+            .set_text("Read back the hold: ${global_data.booking.readback}. When the caller is done, "
+                      "call return_to_concierge.") \
             .set_functions(["return_to_concierge"])
         self.set_dynamic_config_callback(self.from_handoff)
 
     def from_handoff(self, query_params, body_params, headers, agent):
-        """Rebuild global_data from the handoff record named in the transfer URL."""
+        """Rebuild global_data from the one-time handoff record named in the transfer URL."""
         token = query_params.get("h")
-        record = handoff.load(token)
+        record = handoff.claim(token)
         if record:
-            agent.set_global_data({"handoff_id": token, "summary": record["summary"], "trip": record["trip"]})
+            agent.set_global_data({"handoff_id": token, "summary": record["summary"], "trip": record["trip"],
+                                   "looked_up": record.get("looked_up") or []})
 
     def _options(self, trip):
         flights = self.destinations[trip["destination"]]["flights"]
@@ -135,7 +157,7 @@ class BookingDesk(AgentBase):
         options = self._options(trip)
         if not options:
             return FunctionResult(f"No flights to {trip['destination_name']} have {trip['travelers']} seats.")
-        listing = "; ".join(f"{f['id']} departing {f['depart']}, ${f['price'] * trip['travelers']} "
+        listing = "; ".join(f"{f['id']} departing {spoken(f['depart'])}, ${f['price'] * trip['travelers']} "
                             f"total for {trip['travelers']}" for f in options)
         return FunctionResult(f"Flights to {trip['destination_name']}: {listing}.")
 
@@ -155,22 +177,22 @@ class BookingDesk(AgentBase):
         booking = {"ref": f"R-{(gd.get('handoff_id') or 'direct')[:6].upper()}", "flight_id": flight_id,
                    "travelers": trip["travelers"], "total": total,
                    "readback": f"{trip['travelers']} seats on {flight_id} to {trip['destination_name']}, "
-                               f"departing {flight['depart']}, ${total} total"}
+                               f"departing {spoken(flight['depart'])}, ${total} total"}
         config.BOOKINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with config.BOOKINGS_FILE.open("a") as f:
             f.write(json.dumps({"call_id": raw_data.get("call_id"), **booking}) + "\n")
-        if gd.get("handoff_id"):
-            handoff.update(gd["handoff_id"], booking=booking)
         return FunctionResult(f"Held: {booking['readback']}.") \
             .update_global_data({"booking": booking}).swml_change_step("done")
 
     @AgentBase.tool(name="return_to_concierge", description="Send the caller back to the concierge.",
                     parameters={"type": "object", "properties": {}})
     def return_to_concierge(self, args, raw_data):
-        # Ending this AI ends the transferred SWML, so the concierge (final=False) resumes.
-        # TODO(blocked: live final=False transfer drops the call; see README Prerequisites)
-        return FunctionResult("Tell the caller you're handing them back to the concierge.",
-                              post_process=True).stop()
+        gd = raw_data.get("global_data") or {}
+        # A fresh one-time token: structured summary + booking result, never the transcript.
+        token = handoff.save({"call_id": raw_data.get("call_id"), "looked_up": gd.get("looked_up") or [],
+                              "summary": gd.get("summary") or "No trip on file.", "booking": gd.get("booking")})
+        return FunctionResult("Tell the caller you're handing them back to the concierge.", post_process=True) \
+            .swml_transfer(agent_url(self, config.CONCIERGE_ROUTE, token), "", final=True)
 
 
 agent = ConciergeDesk()      # the entry point; `swaig-test app.py` picks this one by default

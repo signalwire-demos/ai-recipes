@@ -1,6 +1,6 @@
 """Handler tests for both agents, the handoff round trip, and governance assertions on the SWML
 that swaig-test dumps (default agent = /concierge, --route /booking for the other).
-swml_transfer emits {"SWML": {...}, "transfer": "false"}; swml_change_step emits {"change_step": ...}.
+swml_transfer(final=True) emits {"SWML": {...}, "transfer": "true"}; swml_change_step emits {"change_step": ...}.
 """
 import json
 import os
@@ -58,26 +58,28 @@ def test_destination_info_records_interest(concierge):
     assert acts(concierge.destination_info({"destination": "Atlantis"}, {})) == []
 
 
+def transfer_target(d, route):
+    """The one final transfer in a result: returns (parsed URL, token)."""
+    (transfer,) = [a for a in d["action"] if "SWML" in a]
+    assert transfer["transfer"] == "true"   # final: a non-final transfer into a second ai verb gets 409
+    url = urlsplit(transfer["SWML"]["sections"]["main"][1]["transfer"]["dest"])
+    assert (url.scheme, url.hostname, url.path) == ("https", "travel.example.com", route)
+    assert url.username and url.password                       # basic auth for the platform fetch
+    assert list(parse_qs(url.query)) == ["h"]                  # only an opaque token in the URL
+    assert url.password not in d["response"]                     # the model never sees the credentials
+    return url, parse_qs(url.query)["h"][0]
+
+
 def test_transfer_action_has_booking_url_and_token(concierge):
     raw = {"call_id": "call-1", "global_data": {"looked_up": ["kyoto", "lisbon"]}}
     result = concierge.handoff_to_booking({"destination": "lisbon", "travelers": 2, "month": "december"}, raw)
     d = result.to_dict()
-    (transfer,) = [a for a in d["action"] if "SWML" in a]
-    assert transfer["transfer"] == "false"                       # final=False: caller can come back
-    main = transfer["SWML"]["sections"]["main"]
-    assert "back from the booking desk" in main[0]["set"]["ai_response"]
-    url = urlsplit(main[1]["transfer"]["dest"])
-    assert (url.scheme, url.hostname, url.path) == ("https", "travel.example.com", config.BOOKING_ROUTE)
-    assert url.username and url.password                       # basic auth for the platform fetch
-    token = parse_qs(url.query)["h"][0]
-    assert list(parse_qs(url.query)) == ["h"]                  # only an opaque token in the URL
-    assert find(d["action"], "set_global_data") == [{"handoff_id": token}]
+    url, token = transfer_target(d, config.BOOKING_ROUTE)
     assert d["post_process"] is True
     # the handler-written record: structured trip + a summary built in code
     record = handoff.load(token)
     assert record["trip"] == TRIP and record["call_id"] == "call-1"
     assert record["summary"] == "2 travelers to Lisbon in December. Destinations discussed: kyoto, lisbon."
-    assert url.password not in d["response"]                     # the model never sees the credentials
 
 
 @pytest.mark.parametrize("args, says", [
@@ -93,10 +95,15 @@ def test_handoff_validates_before_transfer(concierge, args, says, tmp_store):
 # --- booking: dynamic config rebuilds global_data from the handoff ------------------
 
 def test_booking_dynamic_config_rebuilds_global_data(booking):
-    token = handoff.save({"call_id": "call-1", "summary": "2 travelers to Lisbon.", "trip": TRIP})
+    token = handoff.save({"call_id": "call-1", "summary": "2 travelers to Lisbon.", "trip": TRIP,
+                          "looked_up": ["lisbon"]})
     copy = BookingDesk()
     booking.from_handoff({"h": token}, {}, {}, copy)
-    assert copy._global_data == {"summary": "2 travelers to Lisbon.", "trip": TRIP, "handoff_id": token}
+    assert copy._global_data == {"summary": "2 travelers to Lisbon.", "trip": TRIP, "handoff_id": token,
+                                 "looked_up": ["lisbon"]}
+    again = BookingDesk()
+    booking.from_handoff({"h": token}, {}, {}, again)                  # one-time: a replay gets nothing
+    assert again._global_data["trip"] is None
 
 
 def test_unknown_or_expired_token_leaves_defaults(booking, monkeypatch):
@@ -111,26 +118,53 @@ def test_unknown_or_expired_token_leaves_defaults(booking, monkeypatch):
 def test_search_flights_uses_handoff_party_size(booking):
     text = booking.search_flights({}, {"global_data": {"trip": TRIP}}).to_dict()["response"]
     assert "FL-101" in text and "$1224 total for 2" in text
+    assert "FL-103 departing December 11 at 18:30" in text           # dates as callers say them
     assert "FL-102" not in text                                  # only 1 seat left
     assert "no trip" in booking.search_flights({}, {"global_data": {}}).to_dict()["response"].lower()
 
 
 def test_hold_flight_books_handoff_trip_only(booking, tmp_store):
-    token = handoff.save({"summary": "s", "trip": TRIP})
-    gd = {"global_data": {"trip": TRIP, "handoff_id": token}, "call_id": "call-1"}
+    gd = {"global_data": {"trip": TRIP, "handoff_id": "abc123xyz"}, "call_id": "call-1"}
     assert acts(booking.hold_flight({"flight_id": "FL-102"}, gd)) == []   # not enough seats
     assert acts(booking.hold_flight({"flight_id": "FL-201"}, gd)) == []   # another destination
     result = booking.hold_flight({"flight_id": "fl-103"}, gd)
     assert find(acts(result), "change_step") == ["done"]
     held = find(acts(result), "set_global_data")[0]["booking"]
-    assert held["total"] == 1180 and held["travelers"] == 2
-    assert handoff.load(token)["booking"] == held
+    assert held["total"] == 1180 and held["travelers"] == 2 and held["ref"] == "R-ABC123"
     assert json.loads((tmp_store / "bookings.jsonl").read_text())["flight_id"] == "FL-103"
 
 
-def test_return_to_concierge_stops_this_agent(booking):
-    result = booking.return_to_concierge({}, {})
-    assert find(acts(result), "stop") == [True]
+def test_return_to_concierge_transfers_back_with_fresh_token(booking):
+    held = {"ref": "R-ABC123", "flight_id": "FL-103", "readback": "2 seats on FL-103 to Lisbon"}
+    gd = {"handoff_id": "abc123xyz", "summary": "2 travelers to Lisbon in December.", "trip": TRIP,
+          "looked_up": ["lisbon"], "booking": held}
+    d = booking.return_to_concierge({}, {"call_id": "call-1", "global_data": gd}).to_dict()
+    url, token = transfer_target(d, config.CONCIERGE_ROUTE)
+    assert token != "abc123xyz" and d["post_process"] is True
+    assert find(d["action"], "stop") == []
+    record = handoff.load(token)
+    assert {k: record[k] for k in ("summary", "booking", "looked_up", "call_id")} == {
+        "summary": gd["summary"], "booking": held, "looked_up": ["lisbon"], "call_id": "call-1"}
+    # no transcript or conversation fields cross back, only the structured summary and result
+    assert set(record) == {"call_id", "summary", "booking", "looked_up", "created"}
+
+
+@pytest.mark.parametrize("booking_result, says", [
+    ({"ref": "R-ABC123", "readback": "2 seats on FL-103 to Lisbon"}, "held 2 seats on FL-103 to Lisbon, reference R-ABC123"),
+    (None, "Nothing was booked."),
+])
+def test_concierge_resumes_with_return_context(concierge, booking_result, says):
+    token = handoff.save({"summary": "2 travelers to Lisbon in December.", "looked_up": ["lisbon"],
+                          "booking": booking_result})
+    copy = ConciergeDesk()
+    concierge.from_booking({"h": token}, {}, {}, copy)
+    assert copy._global_data == {"looked_up": ["lisbon"], "booking": booking_result}
+    section = copy.pom.find_section("Returning caller").body
+    assert says in section and "2 travelers to Lisbon in December." in section
+    assert handoff.load(token) is None                                 # claimed: one-time token
+    fresh = ConciergeDesk()
+    concierge.from_booking({}, {}, {}, fresh)                          # a first-time caller: no section
+    assert fresh.pom.find_section("Returning caller") is None
 
 
 # --- governance: read the SWML exactly as swaig-test dumps it ----------------------
