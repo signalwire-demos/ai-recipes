@@ -64,12 +64,14 @@ class ReminderAgent(AgentBase):
             .set_functions(["confirm_appointment", "reschedule_appointment",
                             "cancel_appointment", "opt_out"]) \
             .set_valid_steps([])
-        ctx.add_step("wrap_up").set_text("Thank them and say goodbye.").set_functions([])
+        ctx.add_step("wrap_up").set_text("Thank them and say goodbye.").set_functions([]) \
+            .set_valid_steps([])  # last step: no next_step tool (recipe 12 looped on next_step("next") live)
 
     @AgentBase.tool(
         name="confirm_identity",
         description="Record whether the person on the phone is the contact.",
-        parameters={"type": "object", "properties": {"is_contact": {"type": "boolean"}},
+        parameters={"type": "object", "properties": {"is_contact": {
+            "type": "boolean", "description": "True only if the person said they are the contact"}},
                     "required": ["is_contact"]},
     )
     def confirm_identity(self, args, raw_data):

@@ -104,6 +104,26 @@ swaig-test app.py --dump-swml --raw --query-params '{"appt":"A-0101"}' | jq '.se
 swaig-test app.py --custom-data '{"global_data": {"appointment_id": "A-0101"}}' --exec confirm_identity --is_contact true
 ```
 
+### Live test
+
+Live-tested on 2026-10-30 with signalwire-sdk 3.7.5.
+
+- `python dialer.py --dry-run` at 18:38 UTC on the bundled data: skip `A-0102` (no consent) and
+  `A-0103` (do-not-call), call `A-0101` (New York, 14:38), `A-0104` (Denver) and `A-0105` (Honolulu,
+  08:38, just inside `08:00-21:00`). With `CALL_WINDOW=09:00-21:00`, `A-0105` is skipped as
+  "outside calling hours (08:39 local)". So the window is checked in each contact's own time zone.
+- Real dial: the dialer ran against a one-row copy of the list, with `A-0101`'s phone set to the demo
+  pool's `TEST_INBOUND` and the time zone set to `America/Chicago` (the number's 918 area, 14:32 local).
+  Call `858e8448-2742-497b-adab-c42fa2ad006d` (`OUTBOUND_1` to `TEST_INBOUND`, 45 s) went to
+  `https://USER:PASS@<host>/?appt=A-0101`, and a scripted SWML answerer picked up. `global_data`
+  started with only `appointment_id` and `first_name`. The agent asked for Jordan without saying
+  why it was calling, and the details reached the model only after `confirm_identity(true)`.
+  "Yes, I can make it" ran `confirm_appointment`, and `data/calendar.ics` changed `A-0101` from
+  `STATUS:TENTATIVE` to `STATUS:CONFIRMED`.
+- Note: speech recognition split "Yes, this is Jordan" into "Yes." and "is Jordan", and the model
+  confirmed identity on the bare "Yes" to "May I speak with Jordan?". Not tested live: a wrong
+  person, reschedule, cancel and opt-out (all covered by tests).
+
 ## Deploy
 
 ```bash
