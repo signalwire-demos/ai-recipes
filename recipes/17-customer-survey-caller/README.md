@@ -75,7 +75,19 @@ python score_results.py                    # after one or more calls
 
 For inbound, set the phone number's call handler to `https://USER:PASS@<your-tunnel>/`
 (USER/PASS = SWML_BASIC_AUTH_USER/PASSWORD) and call it. Try answering "eleven" to the rating
-question: the agent is told the answer wasn't recorded and asks again.
+question. On the live calls the model refused it itself and asked again. If it passes it on,
+`log_response` refuses it and nothing is written.
+
+Live-tested 2026-10-30, outbound call `bde21dc7-6976-4f8c-99ef-1eb39fa5fda1` (87 s).
+`call_customer.py P-L1-a3` dialed `OUTBOUND_1` -> `TEST_INBOUND`, where a scripted answerer
+replied. The caller said "Eleven", and the agent asked for a number from 1 to 10. Then
+`log_response` recorded `likely_to_recommend = 9` (sent as the word "nine"),
+`best_part = staff`, `issue_resolved = yes` and an empty optional comment. That is four rows in
+`data/results.jsonl` with `customer_id: P-L1-a3`, which came from the dial URL, and
+`score_results.py` scored them. The live calls found one bug, now fixed: the model sends ratings
+as words, and the handler's `int()` refused "nine" as "not a number" until the caller gave up
+(call `46145b42-c87c-4370-a439-1463b9a9a476`). `spoken_number()` now reads digits or number
+words, so "eleven" is still out of range.
 
 Without a phone:
 

@@ -21,6 +21,24 @@ from signalwire.prefabs import SurveyAgent
 import config
 
 YES = {"yes", "y", "yeah", "yep", "sure"}
+NUMBER_WORDS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+    "fifteen sixteen seventeen eighteen nineteen twenty".split())}
+
+
+def spoken_number(text: str) -> int | None:
+    """The first number in the answer, as digits or as a word: "9", "nine", "a nine out of ten".
+
+    The live call passed log_response("nine"), which int() can't read, so a valid rating was
+    refused (call 46145b42).
+    """
+    m = re.search(r"\d+(?:\.\d+)?", text)
+    if m:
+        return int(float(m[0]))
+    for word in re.findall(r"[a-z]+", text):
+        if word in NUMBER_WORDS:
+            return NUMBER_WORDS[word]
+    return None
 NO = {"no", "n", "nope", "nah"}
 
 
@@ -30,9 +48,8 @@ def normalize(question: dict, response) -> tuple:
     kind = question["type"]
     if kind == "rating":
         scale = question.get("scale", 5)
-        try:
-            value = int(float(text))
-        except ValueError:
+        value = spoken_number(text)
+        if value is None:
             return None, f"That isn't a number. Ask for a number from 1 to {scale}."
         if not 1 <= value <= scale:
             return None, f"Ratings go from 1 to {scale}. Ask again."
