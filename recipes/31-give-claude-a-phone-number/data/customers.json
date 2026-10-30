@@ -1,0 +1,23 @@
+{
+  "+15555550101": {
+    "account_id": "ACME-1001",
+    "name": "Dana Rivera",
+    "plan": "Fiber 500",
+    "open_ticket": "Intermittent drops in the evening",
+    "internal": {"credit_risk": "low", "churn_score": 0.12}
+  },
+  "+15555550102": {
+    "account_id": "ACME-1002",
+    "name": "Sam Okafor",
+    "plan": "Fiber 1000",
+    "open_ticket": null,
+    "internal": {"credit_risk": "high", "churn_score": 0.71}
+  },
+  "+15555550103": {
+    "account_id": "ACME-1003",
+    "name": "Priya Shah",
+    "plan": "Business 2 Gig",
+    "open_ticket": "Static IP request",
+    "internal": {"credit_risk": "low", "churn_score": 0.05}
+  }
+}

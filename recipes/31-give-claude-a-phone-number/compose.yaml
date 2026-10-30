@@ -1,0 +1,17 @@
+services:
+  app:
+    build: .
+    env_file:
+      - path: .env        # cp .env.example .env first; optional so `docker compose config` works on a clean clone
+        required: false
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+      CALLBACKS_FILE: /app/data/runtime/callbacks.jsonl
+    volumes:
+      - callbacks:/app/data/runtime   # booked callbacks survive restarts
+    restart: unless-stopped
+
+volumes:
+  callbacks:
