@@ -71,9 +71,13 @@ stateDiagram-v2
 - A public URL for your machine (ngrok or similar). It must be set in `PUBLIC_URL`, because the
   transfer URL to `/booking` is built from it.
 - No third-party accounts. Flights are mock inventory in `data/destinations.json`.
-- TODO(blocked: confirm on a live call that `stop()` in `return_to_concierge` ends the booking
-  AI and returns control to the concierge. The `final=False` return path isn't spelled out in
-  the 3.7.5 docs. Ask the SDK maintainers for the preferred way to end a transferred agent.)
+- TODO(blocked: the `final=False` transfer drops the call on the live platform. On 2026-10-30
+  (call `94171698-68af-4373-bac8-48ee31fbf981`) the platform fetched `/booking?h=<token>` (200,
+  same call ID, `global_data` rebuilt) and the call ended about 5 seconds later, before the
+  booking agent spoke. The same flow with `final=True` (diagnostic call
+  `8b1e7289-5113-432e-a1d7-f98c811ef784`) ran the booking agent end to end. The return path is
+  also unconfirmed: `stop()` in `return_to_concierge` should end the booking AI so the concierge
+  resumes. Both are questions for the SDK and platform maintainers.)
 
 ## Setup
 

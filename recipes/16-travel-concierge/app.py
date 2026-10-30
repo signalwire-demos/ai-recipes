@@ -168,7 +168,7 @@ class BookingDesk(AgentBase):
                     parameters={"type": "object", "properties": {}})
     def return_to_concierge(self, args, raw_data):
         # Ending this AI ends the transferred SWML, so the concierge (final=False) resumes.
-        # TODO(blocked: confirm on a live call that stop() returns control to the concierge)
+        # TODO(blocked: live final=False transfer drops the call; see README Prerequisites)
         return FunctionResult("Tell the caller you're handing them back to the concierge.",
                               post_process=True).stop()
 
