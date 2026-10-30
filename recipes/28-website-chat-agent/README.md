@@ -105,10 +105,9 @@ curl -s localhost:3000/site/widget-config.js   # what the page learns: endpoint 
 
 Test guests: room 412 (Rivera), room 1108 (Chen).
 
-TODO(blocked: needs live verification) A full widget conversation needs the tunnel, which was
-busy when this was built. The gateway reached the AI Chat API with real credentials (it
-answered `-32008` for a localhost `config_url`, as expected), and the whole wire flow is
-covered by tests against a mock endpoint.
+Verified live on 2026-10-30: the gateway flow (`start`, then chat turns on the handle) ran
+through a tunnel against the AI Chat service, and the agent verified a guest and logged a
+request with `channel: text`.
 
 ## Deploy
 
