@@ -52,6 +52,9 @@ def sms_body(booking: dict) -> str:
     return config.SMS_TEMPLATE.format(business=config.BUSINESS_NAME, **booking)
 
 
+EMPTY_CXML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
+
+
 def cxml_reply(text: str) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escape(text)}</Message></Response>'
 
@@ -186,6 +189,10 @@ class ConfirmationAgent(AgentBase):
             ):
                 return Response(status_code=403)
             form = dict(parse_qsl(raw))
+            if form.get("From", "") == config.SMS_FROM:
+                # Our own text (a number texting itself, or a reply echoed back): answering it
+                # would start an auto-reply loop. Return cXML with no <Message>.
+                return Response(EMPTY_CXML, media_type="application/xml")
             reply = await asyncio.to_thread(self.handle_sms, form.get("From", ""), form.get("Body", ""))
             return Response(cxml_reply(reply), media_type="application/xml")
 

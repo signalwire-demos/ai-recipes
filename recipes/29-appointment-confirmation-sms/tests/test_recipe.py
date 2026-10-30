@@ -124,6 +124,13 @@ def test_inbound_non_escalating_reply_resends_details(agent, client, monkeypatch
     assert "AC-1001" in r.text and "2026-11-03" in r.text
 
 
+def test_inbound_from_our_own_number_gets_no_reply(agent, client, monkeypatch):
+    # Live test: SMS_1 texting itself looped, each cXML reply arriving as a new inbound text.
+    monkeypatch.setattr(agent, "dial_back", lambda b: pytest.fail("should not dial"))
+    r = post_sms(client, "+15550100", "change it")
+    assert r.status_code == 200 and "<Message>" not in r.text
+
+
 def test_inbound_from_unknown_number(agent):
     assert "couldn't find a booking" in agent.handle_sms("+15550199", "change it")
 

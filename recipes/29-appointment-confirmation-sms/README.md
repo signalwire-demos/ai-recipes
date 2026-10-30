@@ -10,7 +10,8 @@ number, and tells the caller the text is on its way. If the customer later repli
 (or "reschedule", "move", "call"), the `/sms` webhook finds their booking by phone number and
 places a REST call back to them. That call opens on the reschedule step with the booking
 already loaded, so the agent greets them by name and only asks for the new slot. Any other
-reply gets the booking details texted back.
+reply gets the booking details texted back. A text from the SMS number itself gets no reply,
+so the number can't loop on its own answers.
 
 ## What it demonstrates
 
@@ -72,9 +73,9 @@ sequenceDiagram
 - A public URL for your machine (ngrok or similar)
 - No third-party accounts. The calendar and booking store are JSON files under `data/`.
 
-TODO(blocked: live SMS pending; `SMS_1` is not yet assigned to the 10DLC campaign, see
-NUMBERS.md. Until it is, carriers drop the texts. The send path is covered by tests that
-assert on the `send_sms` action.)
+Texts only deliver from a number on a 10DLC campaign (or verified toll-free). Sending from an
+unregistered number fails: in our live test, a text from an unregistered number to `SMS_1` came
+back `undelivered` with `rejected_by_receiving_carrier_for_unspecified_reason`.
 
 ## Setup
 
