@@ -1,0 +1,10 @@
+# CPU-only PyTorch wheels (sentence-transformers needs torch). Without this line, pip on
+# Linux pulls the CUDA build, which adds gigabytes this recipe never uses.
+--extra-index-url https://download.pytorch.org/whl/cpu
+signalwire-sdk==3.7.5
+# Querying a local .swsearch index embeds the caller's question with the same model the
+# index was built with, so it needs numpy, scikit-learn, nltk and sentence-transformers.
+# In 3.7.5 the [search-queryonly] extra installs exactly those (the same set as [search]);
+# it is named here because this app only queries. sw-search builds with the same set.
+signalwire-sdk[search-queryonly]==3.7.5
+pytest==9.2.0
