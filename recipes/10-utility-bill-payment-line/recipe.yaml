@@ -1,0 +1,11 @@
+id: 10-utility-bill-payment-line
+title: AI Utility Bill Payment Line
+group: B
+capability: [voice, ai-agent, payments]
+language: python
+difficulty: intermediate
+size: M
+status: confirm
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, pay, record_call]
+channels: [voice]
+external: []
