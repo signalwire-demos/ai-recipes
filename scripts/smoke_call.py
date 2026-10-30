@@ -121,7 +121,11 @@ def main() -> int:
     if not (recipe / "app.py").is_file():
         sys.exit(f"smoke_call: {recipe}/app.py not found")
 
-    env = {**os.environ, **read_env(ROOT / ".env"), **read_env(recipe / ".env")}
+    # Worktrees have no .env of their own: fall back to the main checkout's (or RECIPES_ENV_FILE).
+    root_env = Path(os.environ.get("RECIPES_ENV_FILE", ROOT / ".env"))
+    if not root_env.is_file():
+        root_env = Path.home() / "workdir/demos/.env"
+    env = {**os.environ, **read_env(root_env), **read_env(recipe / ".env")}
     env.setdefault("PUBLIC_URL", "https://briankwest.ngrok.io")
     env.setdefault("PORT", "3000")
     for key in ("SIGNALWIRE_PROJECT_ID", "SIGNALWIRE_API_TOKEN", "SIGNALWIRE_SPACE", "TEST_INBOUND", "TEST_CALLER"):

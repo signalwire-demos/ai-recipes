@@ -498,3 +498,9 @@ client.messages.create(to="+15550142", from_=os.environ["SMS_1"], body="Your boo
 ```
 
 Response objects are plain dicts (TypedDicts). `from_` has a trailing underscore.
+
+## AI Chat (AIChatClient, ChatGateway): gotchas found in #27/#28
+
+- `AIChatClient` builds `https://{SIGNALWIRE_SPACE}.signalwire.com/api/ai/chat`. Our `.env` stores the full host (`example.signalwire.com`), which produces `...signalwire.com.signalwire.com` and fails TLS. Pass the API URL explicitly (see `CHAT_API_URL` in recipes 27/28).
+- An unhandled `ChatGateway` error returns a plain-text 500 on `start`, `log` and `end`. Add a JSON error handler if a browser widget calls it.
+- `agent.mount(...)` is the supported way to add extra routes (`/sms`, `/pay`, static pages) next to the agent.
