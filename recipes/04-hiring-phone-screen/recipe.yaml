@@ -1,0 +1,11 @@
+id: 04-hiring-phone-screen
+title: AI Hiring Phone Screen
+group: A
+capability: [voice, ai-agent, outbound, rest]
+language: python
+difficulty: beginner
+size: S
+status: ready
+primitives: [contexts-steps, gather, set_functions, valid_steps, swml_change_step, global_data, dynamic-config, rest-dial]
+channels: [voice]
+external: []
