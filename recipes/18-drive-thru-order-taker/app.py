@@ -66,7 +66,9 @@ class DriveThruAgent(AgentBase):
         ctx.add_step("done") \
             .set_text("Give the order number ${global_data.order_number} and the total, and ask them "
                       "to pull forward to the window.") \
-            .set_functions([])
+            .set_functions([]) \
+            .set_valid_steps([]) \
+            .set_end(True)
 
     def _place(self, args, raw_data, replace=None, back=None):
         """Validate one line and add it (or replace line `replace`). Stock-outs jump."""

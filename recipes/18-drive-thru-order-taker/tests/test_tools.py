@@ -210,3 +210,10 @@ def test_governance_prices_are_not_in_the_prompt():
     agent = DriveThruAgent()
     prompt = json.dumps(agent.get_prompt())
     assert "449" not in prompt and "$" not in prompt
+
+
+def test_governance_done_is_terminal(steps):
+    # Without valid_steps the platform offers next_step on the last step, and the model can
+    # loop on it (seen live in #7, #10, #12, #13). The last step ends the flow.
+    final = steps["done"]
+    assert final["functions"] == [] and final["valid_steps"] == [] and final["end"] is True
