@@ -46,16 +46,40 @@ stateDiagram-v2
 | `SWAIG.functions` = exactly `[lookup_order, issue_credit]` | `app.py`, `define_tool` calls, `sidecar_config()` |
 | Cap enforced in the handler, never shown to the model | `app.py`, `credit_refusal()`, `issue_credit()`, `REFUSED` |
 | Sidecar callback consumer (`sidecar_event.type`) | `app.py`, `on_event()` and `POST /events` |
+| Order ID as heard ("eight one zero zero two") resolved in code | `app.py`, `resolve_order_id()` |
+
+### Live-tested
+
+Live-tested on 2026-10-30. `ai_sidecar` is enabled on the demo Space. The customer was a scripted
+caller to `TEST_INBOUND`. `REP_NUMBER` was our `OUTBOUND_1`, answered by a scripted rep, so the call
+bridged and the sidecar heard both legs.
+
+- Call `495056c3-3a9a-4319-910b-8907f0845597`: the rep said "I'll put a ten dollar credit on order
+  A 1 0 0 1", and `issue_credit(A-1001, 10)` was issued and written to `data/credits.jsonl`.
+  `lookup_order` pushed the A-1001 and A-1002 order cards. The rep then said "a forty dollar credit
+  on order A 1 0 0 2", and `issue_credit` was **refused** in the handler. The model got the fixed
+  sentence, and the rep card got "40.00 is over the copilot cap of 25.00. Escalate to a supervisor."
+  All of it, plus the `final` card, arrived at `/rep/stream`.
+- Call `7639199e-679f-4581-a57f-d7c15b1c8ed8`, before the fixes: `lookup_order(A-1001)` worked,
+  then every later sidecar tick logged an error (`stats.error_count` 4, no tool calls), so neither
+  credit ran. The model's step after `lookup_order` was a free-text insight, and no insight was
+  delivered on any live call. `lookup_order` now ends its response with "Call sidecar_skip." like
+  `issue_credit`. Speech-to-text also wrote "A 1 0 0 2" as "eight one zero zero two", and the model
+  sent `A-81002`. `resolve_order_id()` maps that to the one order whose number ends the digits
+  heard, and it did so live on the second call.
+
+No `insight` card was tested live.
+
 | Rep page over SSE | `app.py`, `GET /rep/stream`; UI in `web/` |
 
 Not available yet, so this recipe doesn't attempt them:
 
-- The `ai_sidecar` verb is documented (SWML reference, SDK schema since 3.4.0), but no source
-  says whether it's generally available. Ask SignalWire support whether it's enabled on your Space.
+- The `ai_sidecar` verb works on the demo Space (live calls above), but no source says whether
+  it's generally available. Ask SignalWire support whether it's enabled on your Space.
 - `TODO(blocked: no documented way to whisper audio to the human rep)`. The plan's optional
   `rpc_ai_message` whisper reaches only an AI agent, not a person, so results go to the rep page instead.
-- `TODO(blocked: per-type ai_sidecar callback fields are at docs apis/rest/webhooks/ai-sidecar-callback, not verified)`.
-  `on_event()` handles only the documented `insight` and `final` fields.
+- Callback fields seen live: `turn` events carry `customer_text` and `agent_text`. `final`
+  carries `stop_reason`, `history` and `stats`. `on_event()` uses `insight` and `final`.
 - `TODO(blocked: no documented REST/RELAY command to start ai_sidecar on a call already in progress)`.
 
 ## Prerequisites
