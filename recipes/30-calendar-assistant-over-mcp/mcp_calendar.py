@@ -1,23 +1,27 @@
 """Reference calendar MCP server: in memory, MCP over streamable HTTP (JSON responses).
 
-Swap it for any calendar MCP server by changing MCP_URL / MCP_TOKEN. What it shows:
-the server decides what each client may do. A bearer token maps to a scope
-(config.MCP_SCOPES), and tools outside that scope are neither listed nor callable.
-Free-slot answers never reveal whose meeting is in the way.
+By default app.py serves it from the agent's own app at config.MCP_CALENDAR_PATH
+(/mcp-calendar), so one public URL covers both the SWML and the MCP server. Swap it for
+any calendar MCP server by setting MCP_URL / MCP_TOKEN. What it shows: the server
+decides what each client may do. A bearer token maps to a scope (config.MCP_SCOPES),
+and tools outside that scope are neither listed nor callable. Free-slot answers never
+reveal whose meeting is in the way.
 
-  python mcp_calendar.py        # listens on config.MCP_PORT (PORT + 1)
+  python mcp_calendar.py        # optional: run it on its own, POST /mcp on config.MCP_PORT
 """
 import itertools
+import logging
 import secrets
 from datetime import datetime, timedelta
 
 import uvicorn
-from fastapi import FastAPI, Request, Response
+from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
 import config
 
 FMT = "%Y-%m-%d %H:%M"
+log = logging.getLogger("uvicorn.error")   # shows up in the server log next to the access lines
 
 
 class Calendar:
@@ -95,10 +99,11 @@ def seed_meetings(seed: list) -> list:
              "start": f"{day:%Y-%m-%d} {m['time']}"} for i, m in enumerate(seed)]
 
 
-def create_app(calendar: Calendar | None = None, scopes: dict | None = None) -> FastAPI:
+def create_router(calendar: Calendar | None = None, scopes: dict | None = None, path: str = "/mcp") -> APIRouter:
+    """The MCP endpoint as a router: POST <prefix><path>. app.py mounts it with path=""."""
     cal = calendar or Calendar(seed_meetings(config.SEED_MEETINGS))
     scopes = config.MCP_SCOPES if scopes is None else scopes
-    app = FastAPI()
+    router = APIRouter()
 
     def ok(req_id, result):
         return JSONResponse({"jsonrpc": "2.0", "id": req_id, "result": result})
@@ -106,7 +111,7 @@ def create_app(calendar: Calendar | None = None, scopes: dict | None = None) -> 
     def err(req_id, code, message):
         return JSONResponse({"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}})
 
-    @app.post("/mcp")
+    @router.post(path)
     async def mcp(request: Request):
         token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
         allowed = next((tools for t, tools in scopes.items() if t and secrets.compare_digest(t, token)), None)
@@ -132,10 +137,20 @@ def create_app(calendar: Calendar | None = None, scopes: dict | None = None) -> 
                 text, is_error = getattr(cal, name)(**{k: str(args[k]) for k in TOOLS[name][1]["required"]}), False
             except (KeyError, ValueError) as exc:
                 text, is_error = f"Bad arguments: {exc}. Dates are YYYY-MM-DD, times YYYY-MM-DD HH:MM.", True
+            log.info("mcp tools/call %s %s -> %s", name, args, text)
             return ok(req_id, {"content": [{"type": "text", "text": text}], "isError": is_error})
         return err(req_id, -32601, f"Method not found: {method}")
 
-    app.state.calendar = cal
+    router.calendar = cal
+    return router
+
+
+def create_app(calendar: Calendar | None = None, scopes: dict | None = None) -> FastAPI:
+    """Standalone server: POST /mcp."""
+    router = create_router(calendar, scopes)
+    app = FastAPI()
+    app.include_router(router)
+    app.state.calendar = router.calendar
     return app
 
 

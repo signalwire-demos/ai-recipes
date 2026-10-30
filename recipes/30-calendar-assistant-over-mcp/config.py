@@ -39,10 +39,23 @@ ROUTE = "/"
 
 # --- The calendar MCP server the agent uses ---------------------------------
 # SignalWire's platform (not this process) connects to MCP_URL at the start of each call,
-# lists its tools and calls them. On a live call MCP_URL must be a public HTTPS URL.
-MCP_PORT = int(os.environ.get("MCP_PORT", PORT + 1))
-MCP_URL = os.environ.get("MCP_URL") or f"http://localhost:{MCP_PORT}/mcp"
+# lists its tools and calls them, so on a live call MCP_URL must be a public HTTPS URL.
+# Default: app.py serves the reference calendar (mcp_calendar.py) itself at
+# MCP_CALENDAR_PATH, so the one PUBLIC_URL tunnel covers the SWML and the MCP server.
+# To use an external calendar MCP server instead, set MCP_URL (and its MCP_TOKEN) in .env;
+# the built-in one is then switched off unless SERVE_REFERENCE_CALENDAR=true.
+MCP_CALENDAR_PATH = "/mcp-calendar"
+_BASE_URL = (os.environ.get("PUBLIC_URL") or f"http://localhost:{PORT}").rstrip("/")
+MCP_URL = os.environ.get("MCP_URL") or f"{_BASE_URL}{MCP_CALENDAR_PATH}"
 MCP_TOKEN = os.environ.get("MCP_TOKEN", "")
+SERVE_REFERENCE_CALENDAR = os.environ.get(
+    "SERVE_REFERENCE_CALENDAR", "false" if os.environ.get("MCP_URL") else "true").lower() == "true"
+MCP_PORT = int(os.environ.get("MCP_PORT", PORT + 1))   # only for `python mcp_calendar.py` on its own
+
+# get_today guard. If the MCP tools never reached the call (wrong MCP_URL, server down),
+# get_today is the model's only tool and it tends to call it over and over. After this many
+# calls in one call, get_today says the calendar is unavailable and switches itself off.
+GET_TODAY_MAX_CALLS = 3
 
 # --- Reference calendar server (mcp_calendar.py) only ------------------------
 # Each bearer token gets a tool scope. The voice agent's token can find, book and move;
