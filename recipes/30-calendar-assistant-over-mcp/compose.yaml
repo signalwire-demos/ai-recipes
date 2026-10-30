@@ -1,0 +1,24 @@
+services:
+  app:
+    build: .
+    env_file:
+      - path: .env        # cp .env.example .env first; optional so `docker compose config` works on a clean clone
+        required: false
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+    restart: unless-stopped
+
+  calendar:                 # the reference calendar MCP server (in memory)
+    build: .
+    command: ["python", "mcp_calendar.py"]
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${MCP_PORT:-3001}:3001"
+    environment:
+      MCP_PORT: "3001"
+      MCP_TOKEN: "${MCP_TOKEN:-change-me-calendar-token}"
+    restart: unless-stopped
