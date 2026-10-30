@@ -127,10 +127,12 @@ class SalesCopilot(SWMLService):
         if kind == "final":
             return [self.feed.push({"kind": "final", "text": event.get("stop_reason", "ended"),
                                     "call_id": call_id})]
-        # TODO(blocked: per-type callback fields are at docs apis/rest/webhooks/ai-sidecar-callback,
-        # not verified). Transcript events are classified only if they carry a string "text".
-        if kind in config.TRANSCRIPT_EVENT_TYPES and isinstance(event.get("text"), str):
-            return self.objection_cards(event["text"], call_id, source="transcript")
+        # Every "turn" event carries the customer's words (live call 6d04cc81): the classifier runs
+        # on each one in code, so an objection the model skips still reaches the rep. A card the
+        # tool already pushed isn't repeated (REPEAT_AFTER_S per call and category).
+        text = event.get(config.TRANSCRIPT_FIELD)
+        if kind in config.TRANSCRIPT_EVENT_TYPES and isinstance(text, str) and text.strip():
+            return self.objection_cards(text, call_id, source="transcript")
         return []
 
 

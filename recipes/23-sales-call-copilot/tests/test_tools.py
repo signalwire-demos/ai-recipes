@@ -99,14 +99,26 @@ def test_final_event_becomes_card(svc):
     assert svc.on_event(event("final", stop_reason="transcribe_close"))[0]["text"] == "transcribe_close"
 
 
-def test_transcript_event_runs_classifier(svc):
-    cards = svc.on_event(event("transcription", text="I need sign-off from procurement"))
-    assert [c["category"] for c in cards] == ["authority"] and cards[0]["source"] == "transcript"
+def test_turn_event_runs_classifier_on_the_customer_only(svc):
+    """Live call 6d04cc81: the model skipped "We already use Globex"; the turn event had it."""
+    cards = svc.on_event(event("turn", customer_text="We already use Globex for our call center.",
+                               agent_text="What are you comparing the price against?",
+                               transcript_delta="..."))
+    assert [c["category"] for c in cards] == ["competitor"] and cards[0]["source"] == "transcript"
+    # the rep's words never make a card, even when they name an objection
+    assert svc.on_event(event("turn", customer_text="", agent_text="Is the price too expensive?")) == []
+
+
+def test_tool_and_turn_on_the_same_objection_make_one_card(svc):
+    svc.flag_objection({"customer_quote": "it's too expensive for us"}, {"call_id": "call-1"})
+    again = svc.on_event(event("turn", customer_text="But honestly, it's too expensive for us."))
+    assert again == [] and len(svc.feed.since(0)) == 1
 
 
 def test_unknown_or_top_level_events_are_ignored(svc):
     assert svc.on_event({"type": "insight", "raw": "top-level, not under sidecar_event"}) == []
     assert svc.on_event(event("say", text="too expensive")) == []
+    assert svc.on_event(event("transcription", text="too expensive")) == []    # not a live type
     assert svc.feed.since(0) == []
 
 
