@@ -1,0 +1,11 @@
+id: 30-calendar-assistant-over-mcp
+title: AI Calendar Assistant Over MCP
+group: D
+capability: [voice, ai-agent, mcp]
+language: python
+difficulty: intermediate
+size: M
+status: ready
+primitives: [mcp-client]
+channels: [voice]
+external: []
