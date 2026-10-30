@@ -87,10 +87,9 @@ pip install -r requirements.txt
 cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL and basic auth
 ```
 
-The mock feed URL only answers once this recipe is on `main` in the public repo, because
-SignalWire fetches it from `raw.githubusercontent.com`. TODO(blocked: the live lookup returns
-the "couldn't find" fallback until this recipe is merged to main). The tests don't need it:
-they serve `data/mock-api/` locally.
+SignalWire fetches the mock feed from `raw.githubusercontent.com` (this repo's `main`), so a fork
+or a renamed branch needs its own `TRACKING_API_URL`. The tests don't need it: they serve
+`data/mock-api/` locally.
 
 ## Run locally
 
@@ -121,6 +120,15 @@ Tracking numbers to say on the call:
 | `40010002` | Delivered |
 | `40010003` | Delivery exception (damaged label) |
 | anything else | Not found, so the agent asks again |
+
+Live-tested 2026-10-30, inbound call `8844b865-6866-4a2b-b24d-2a34946ae295` (102 s, scripted
+caller). The agent read each number back and waited for a yes. Then `track_package` ran on
+SignalWire: the AI debug log shows the platform's GET to the raw GitHub URL and the JSON it got
+back. The caller heard "40010001 is in transit... due Tuesday, November 3, by 8 PM, last scan
+Tulsa" and "40010002 is delivered... signed for by D. Example". The app log shows one SWML fetch
+and zero `/swaig` requests, so nothing on this server ran during the lookups. One cosmetic issue:
+the model sometimes says the number as a cardinal ("four hundred million one thousand one")
+before it reads the digits.
 
 ## Deploy
 
