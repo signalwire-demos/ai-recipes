@@ -55,8 +55,8 @@ stateDiagram-v2
   to hear the connection.
 - A caller-ID number for the connected leg (`FROM_NUMBER`, demo pool `OUTBOUND_2`)
 - An SMS-capable sender that's registered for 10DLC or verified toll-free (`SMS_FROM`, demo pool
-  `SMS_1`). TODO(blocked: `SMS_1` isn't on the 10DLC campaign yet, so live texts won't deliver.
-  The send_sms action is built and covered by the tests.)
+  `SMS_1`). Verified live on 2026-10-30: an after-hours call left a message and the owner's
+  text was delivered from `SMS_1` on its 10DLC campaign.
 - A public URL for your machine (ngrok or similar)
 
 ## Setup
