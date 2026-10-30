@@ -101,6 +101,27 @@ On the call, try "I can do twenty dollars a month" a few times: the agent declin
 naming a minimum, then moves to hardship options. "$125 a month for ten months" is accepted.
 "Let me talk to a real person" goes to escalate.
 
+### Live test
+
+Live-tested on 2026-10-30 with signalwire-sdk 3.7.5. Call `97eeed35-2585-4264-a2c7-22d03d2a798e` (ended, 116 s)
+used a scripted caller on `TEST_CALLER` calling `TEST_INBOUND`.
+
+- `find_account("ca20417", "74101")` matched and moved the call to `negotiate`.
+- "$20 a month for twelve months" and "$30 a month for twelve months" both came back `monthly_too_low`.
+  The model heard only "We can't accept that monthly amount. Ask if the caller could manage more",
+  and `refusals` went to 1, then 2.
+- "What's the lowest monthly payment you would accept?" got "I'm unable to provide the lowest monthly
+  payment". The floor (75) and the term limit (18) appear nowhere in the model's context
+  (`call_log` / `raw_call_log`).
+- "$50 a month for twelve months" was the third refusal. The handler returned
+  `change_step: hardship_options` (`negotiate[1] -> hardship_options[2]`), and the model offered the three
+  hardship options. "The payment pause" called `choose_hardship_option(payment_pause)`, the call moved
+  to `wrap_up`, and `data/runtime/outcomes.jsonl` got
+  `{"debt_id": "DEBT-0101", "outcome": "hardship", "option": "payment_pause"}`.
+
+Not tested live: an accepted plan, and the escalate path to `AGENT_NUMBER`. Nobody answers the
+demo pool's `HUMAN_LEG`.
+
 ## Deploy
 
 ```bash
