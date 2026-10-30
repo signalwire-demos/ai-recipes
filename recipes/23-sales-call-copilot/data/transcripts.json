@@ -1,0 +1,30 @@
+{
+  "_note": "Fixture transcripts for the classifier and the replay script. Fake people, fake company. 'expect' is the list of playbook categories the customer line must produce.",
+  "calls": [
+    {
+      "name": "price-and-boss",
+      "lines": [
+        {"speaker": "rep", "text": "Thanks for taking the call. Did you get a chance to look at the proposal?"},
+        {"speaker": "customer", "text": "I did. Honestly it's too expensive for a team our size.", "expect": ["pricing"]},
+        {"speaker": "rep", "text": "Understood. What are you comparing it against?"},
+        {"speaker": "customer", "text": "Mostly what we pay now. And I'd have to run it by my CFO anyway.", "expect": ["authority"]},
+        {"speaker": "customer", "text": "Sounds good, send me the summary.", "expect": []}
+      ]
+    },
+    {
+      "name": "competitor-and-timing",
+      "lines": [
+        {"speaker": "customer", "text": "We already use Globex for our contact center.", "expect": ["competitor"]},
+        {"speaker": "customer", "text": "It's not right now. Maybe next quarter once the migration is done.", "expect": ["timing"]},
+        {"speaker": "customer", "text": "Can you call back in January?", "expect": ["timing"]},
+        {"speaker": "customer", "text": "How does your routing work?", "expect": []}
+      ]
+    },
+    {
+      "name": "two-at-once",
+      "lines": [
+        {"speaker": "customer", "text": "Initech quoted us a cheaper price last week.", "expect": ["pricing", "competitor"]}
+      ]
+    }
+  ]
+}

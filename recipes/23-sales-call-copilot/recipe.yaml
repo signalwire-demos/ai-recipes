@@ -1,0 +1,11 @@
+id: 23-sales-call-copilot
+title: AI Sales Call Copilot
+group: C
+capability: [voice, ai-agent, swml, transcription]
+language: python
+difficulty: advanced
+size: L
+status: blocked
+primitives: [ai_sidecar, swml-service, swaig-functions, sidecar-callbacks, connect-verb, server-sent-events]
+channels: [voice, web]
+external: []
