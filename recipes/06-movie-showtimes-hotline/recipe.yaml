@@ -1,0 +1,11 @@
+id: 06-movie-showtimes-hotline
+title: AI Movie Showtimes Hotline
+group: A
+capability: [voice, ai-agent, swml, rest]
+language: swml
+difficulty: beginner
+size: S
+status: ready
+primitives: [swml-script, ai-verb, datamap, datamap-foreach, datamap-expressions, fallback-output]
+channels: [voice]
+external: []
