@@ -8,6 +8,7 @@ is missing. submit_report exists only in `confirm`, and re-checks the slots
 before it writes anything.
 """
 import json
+import re
 import uuid
 
 from signalwire import AgentBase, FunctionResult
@@ -16,6 +17,7 @@ import config
 from slots import fill
 
 SLOTS = config.SLOTS
+ONE_DAY = re.compile(r"\b(same|that|one|just the) day\b|\bjust (that|one|the one) day\b", re.I)
 
 
 def summary(report: dict) -> str:
@@ -34,13 +36,15 @@ class AbsenceAgent(AgentBase):
             f"You take absence reports for {config.ORG_NAME} by phone. Be brief and warm. "
             "Let the caller say things in any order. Never invent a value the caller didn't say.",
         )
+        self.set_prompt_llm_params(model=config.MODEL)
         self.set_global_data({"absence": {}})
 
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("collect") \
             .set_text(
                 "Ask who will be absent and why. Whenever the caller gives any detail, call "
-                "record_slots with every detail from that turn, using their exact words for dates. "
+                "record_slots with every detail from that turn, using their exact words for dates, "
+                "even a date that sounds unclear: the tool checks it and tells you what to ask. "
                 "Then ask only for what the tool says is still missing."
             ) \
             .set_functions(["record_slots"]) \
@@ -68,7 +72,14 @@ class AbsenceAgent(AgentBase):
 
     def record_slots(self, args, raw_data):
         saved = (raw_data.get("global_data") or {}).get("absence") or {}
+        args = dict(args)
+        one_day = bool(ONE_DAY.search(str(args.get("end_date") or "")))
+        if one_day:
+            args.pop("end_date")
         report, missing, problems = fill(saved, args, {k: v for k, (_, v) in SLOTS.items()})
+        if one_day and report.get("start_date"):   # "just that day": the last day is the first
+            report["end_date"] = report["start_date"]
+            missing = [m for m in missing if m != "end_date"]
         if problems or missing:
             asks = [f"{name}: {question}" for name, question in problems.items()]
             asks += [name for name in missing if name not in problems]

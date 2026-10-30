@@ -16,6 +16,11 @@ _U = "first second third fourth fifth sixth seventh eighth ninth".split()
 _T = "tenth eleventh twelfth thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth".split()
 ORDINALS = {f"twenty {w}": 21 + i for i, w in enumerate(_U)} | {"thirty first": 31, "twentieth": 20,
             "thirtieth": 30} | {w: 10 + i for i, w in enumerate(_T)} | {w: 1 + i for i, w in enumerate(_U)}
+_ONES = "one two three four five six seven eight nine".split()
+_TEENS = "ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen".split()
+# Spoken numbers, as speech-to-text writes them ("eleven two" on live call 5b015855). Longest first.
+CARDINALS = {f"twenty {w}": 21 + i for i, w in enumerate(_ONES)} | {"thirty one": 31, "twenty": 20,
+             "thirty": 30} | {w: 10 + i for i, w in enumerate(_TEENS)} | {w: 1 + i for i, w in enumerate(_ONES)}
 HOLIDAYS = {"new years day": "january 1", "new years eve": "december 31", "christmas eve": "december 24",
             "christmas day": "december 25", "christmas": "december 25", "independence day": "july 4",
             "fourth of july": "july 4", "halloween": "october 31", "valentines day": "february 14"}
@@ -37,7 +42,8 @@ def parse_date(phrase: str) -> tuple[str | None, str | None]:
     day_name = next((w for w in words if w in WEEKDAYS), None)
     if day_name and not any(w in MONTHS or w.isdigit() for w in words):   # "Monday" = the next one
         return (now + timedelta((WEEKDAYS[day_name] - now.weekday()) % 7 or 7)).isoformat(), None
-    for text, value in [*HOLIDAYS.items(), *ORDINALS.items()]:            # longest phrases first
+    s = re.sub(r"\btwenty (twenty|thirty)( (one|two|three|four|five|six|seven|eight|nine))?\b", " ", s)  # a spoken year
+    for text, value in [*HOLIDAYS.items(), *ORDINALS.items(), *CARDINALS.items()]:   # longest phrases first
         s = re.sub(rf"\b{text}\b", str(value), s)
     nums = [int(t) for t in s.split() if t.isdigit()]
     month = next((MONTHS[t] for t in s.split() if t in MONTHS), None)

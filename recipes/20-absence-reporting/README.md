@@ -50,6 +50,32 @@ stateDiagram-v2
 | Date parsing from the caller's words | `slots.py`, `parse_date()` (from `patterns/date-collection`) |
 | `update_global_data` + `swml_change_step` | `app.py`, `record_slots` and `submit_report` |
 | `${global_data.absence_summary}` in step text | `app.py`, step `confirm` |
+| `set_prompt_llm_params(model=...)` | `app.py`, `AbsenceAgent.__init__` (`config.MODEL`) |
+
+### Live-tested
+
+Live-tested on 2026-10-30, call `184e8f66-3c7f-4fd9-a39f-292df204ad92` (gpt-4.1-mini): a scripted
+parent gave the details out of order over five turns (reason and school, then "starting eleven
+two", then "I mean November 2", then the last day, then name and ID). `record_slots` ran three
+times with partial slots, the third opened `confirm`, the caller said yes, and `submit_report`
+wrote `data/runtime/reports/AB-9A7B98.json` (Jamie Rivera, 440142, school, flu, 2026-11-02 to
+2026-11-04). The model then read the reference back.
+
+What the earlier calls found, all fixed here with tests:
+
+- Speech-to-text writes "11 2" as "eleven two", which `parse_date` read as "which date?"
+  instead of "November 2 or February 11?". Spoken numbers are now parsed (call `5b015855-...`).
+- The `end_date` description said "same as start for one day", and the model filled in an end
+  date the caller hadn't given. It now says to leave it out, and "just that day" or "same day"
+  sets the end date to the start date in code (call `5b015855-...`).
+- `name="son"` was accepted. A name now needs two words and no relationship words (call
+  `d8c935db-5f66-497d-b203-ddd84a6c5beb`).
+- On the platform default model (gpt-4o-mini), `record_slots` was skipped on most turns and the
+  agent kept asking for the ID (call `d8c935db-...`). `config.MODEL` now defaults to `gpt-4.1-mini`.
+
+Not proven live: the code's "November 2 or February 11?" question. On every call the model
+didn't pass "eleven two" to `record_slots`. It asked "when exactly will he start?" itself, and the
+caller clarified. The question is covered by `test_spoken_ambiguous_date_is_sent_back_too`.
 
 `slots.py` is copied from `patterns/grammar-filling` and `patterns/date-collection`, so this
 folder works on its own. The changes: dates without a year default to this year, and
