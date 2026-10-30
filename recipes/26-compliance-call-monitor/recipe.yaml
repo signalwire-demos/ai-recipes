@@ -1,0 +1,11 @@
+id: 26-compliance-call-monitor
+title: AI Compliance Call Monitor
+group: C
+capability: [voice, swml, transcription, sms, rest]
+language: python
+difficulty: intermediate
+size: M
+status: confirm
+primitives: [swml-service, live_transcribe, live-events-webhook, transcript-consumer, rule-engine, send_sms, alert-webhook]
+channels: [voice, sms]
+external: []
