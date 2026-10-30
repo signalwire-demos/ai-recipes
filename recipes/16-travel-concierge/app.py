@@ -162,8 +162,8 @@ class BookingDesk(AgentBase):
         options = {str(n): f for n, f in enumerate(flights, 1)}
         lines = " ".join(f"Option {n}: departing {spoken(f['depart'])}, ${f['price'] * trip['travelers']} "
                          f"total for {trip['travelers']}." for n, f in options.items())
-        return FunctionResult(f"{lines} There are no other flights. Read these options, then call "
-                              "hold_flight with the option number the caller picks.") \
+        return FunctionResult(f"These are all the flights we have. {lines} Read these options to the "
+                              "caller, then call hold_flight with the option number the caller picks.") \
             .update_global_data({"options": options})
 
     @AgentBase.tool(name="hold_flight", description="Hold seats on one option from search_flights.",
