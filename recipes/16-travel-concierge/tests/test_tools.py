@@ -115,26 +115,51 @@ def test_unknown_or_expired_token_leaves_defaults(booking, monkeypatch):
         assert copy._global_data == {"summary": "No handoff on file.", "trip": None}
 
 
-def test_search_flights_uses_handoff_party_size(booking):
+def search(booking):
+    """Run search_flights for TRIP; return (response text, stored options)."""
     result = booking.search_flights({}, {"global_data": {"trip": TRIP}})
-    (spoken,) = find(acts(result), "say")             # the platform reads the inventory, not the model
-    text = result.to_dict()["response"]
-    for said in (spoken, text):
-        assert "FL-101 departing December 4 at 18:30, $1224 total for 2" in said
-        assert "FL-103 departing December 11 at 18:30" in said      # dates as callers say them
-        assert "FL-102" not in said                                 # only 1 seat left
+    (stored,) = find(acts(result), "set_global_data")
+    return result.to_dict()["response"], stored["options"]
+
+
+def test_search_flights_numbers_and_stores_results(booking):
+    text, options = search(booking)
+    assert [f["id"] for f in options.values()] == ["FL-101", "FL-103"]   # FL-102 has only 1 seat
+    assert list(options) == ["1", "2"]
+    assert "Option 1: departing December 4 at 18:30, $1224 total for 2." in text
+    assert "Option 2: departing December 11 at 18:30, $1180 total for 2." in text
+    assert "FL-" not in text                       # the model sees option numbers, not flight IDs
+    assert find(acts(booking.search_flights({}, {"global_data": {"trip": TRIP}})), "say") == []
     assert "no trip" in booking.search_flights({}, {"global_data": {}}).to_dict()["response"].lower()
 
 
-def test_hold_flight_books_handoff_trip_only(booking, tmp_store):
-    gd = {"global_data": {"trip": TRIP, "handoff_id": "abc123xyz"}, "call_id": "call-1"}
-    assert acts(booking.hold_flight({"flight_id": "FL-102"}, gd)) == []   # not enough seats
-    assert acts(booking.hold_flight({"flight_id": "FL-201"}, gd)) == []   # another destination
-    result = booking.hold_flight({"flight_id": "fl-103"}, gd)
+def test_hold_flight_maps_option_number_to_stored_flight(booking, tmp_store):
+    _, options = search(booking)
+    gd = {"global_data": {"trip": TRIP, "handoff_id": "abc123xyz", "options": options}, "call_id": "call-1"}
+    result = booking.hold_flight({"option": 2}, gd)
     assert find(acts(result), "change_step") == ["done"]
     held = find(acts(result), "set_global_data")[0]["booking"]
-    assert held["total"] == 1180 and held["travelers"] == 2 and held["ref"] == "R-ABC123"
+    assert held["flight_id"] == "FL-103" and held["total"] == 1180 and held["ref"] == "R-ABC123"
+    assert "December 11" in held["readback"]
     assert json.loads((tmp_store / "bookings.jsonl").read_text())["flight_id"] == "FL-103"
+
+
+@pytest.mark.parametrize("option", [0, 3, 99, -1, "FL-103", "two", None])
+def test_hold_flight_refuses_option_outside_stored_results(booking, tmp_store, option):
+    _, options = search(booking)
+    gd = {"global_data": {"trip": TRIP, "options": options}}
+    result = booking.hold_flight({"option": option}, gd)
+    assert acts(result) == [] and "isn't one of the options" in result.to_dict()["response"]
+    assert not (tmp_store / "bookings.jsonl").exists()
+
+
+def test_hold_flight_refuses_without_search_or_with_tampered_option(booking, tmp_store):
+    no_search = booking.hold_flight({"option": 1}, {"global_data": {"trip": TRIP}})
+    assert acts(no_search) == [] and "search_flights first" in no_search.to_dict()["response"]
+    fake = {"1": {"id": "FL-999", "depart": "2026-12-01 08:00", "price": 1, "seats": 9}}
+    tampered = booking.hold_flight({"option": 1}, {"global_data": {"trip": TRIP, "options": fake}})
+    assert acts(tampered) == []                                         # not in real inventory
+    assert not (tmp_store / "bookings.jsonl").exists()
 
 
 def test_return_to_concierge_transfers_back_with_fresh_token(booking):
@@ -204,7 +229,9 @@ def test_governance_booking_tools_take_no_trip_args_and_dump_rebuilds_global_dat
     assert ai["global_data"]["trip"] == TRIP and ai["global_data"]["handoff_id"] == token
     fns = {f["function"]: f for f in ai["SWAIG"]["functions"]}
     assert fns["search_flights"]["parameters"]["properties"] == {}          # party/destination from handoff
-    assert set(fns["hold_flight"]["parameters"]["properties"]) == {"flight_id"}
+    assert set(fns["hold_flight"]["parameters"]["properties"]) == {"option"}          # a number, not an ID
+    assert fns["hold_flight"]["parameters"]["properties"]["option"]["type"] == "integer"
+    assert ai["prompt"]["model"] == config.BOOKING_MODEL == "gpt-4.1-mini"
     s = steps(ai)
     assert "handoff_to_booking" not in s["choose"]["functions"]
     assert s["done"]["functions"] == ["return_to_concierge"]

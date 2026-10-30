@@ -123,10 +123,11 @@ class BookingDesk(AgentBase):
             "to you with this note: ${global_data.summary} Don't re-ask anything in the note.",
         )
         self.set_global_data({"summary": "No handoff on file.", "trip": None})
+        self.set_prompt_llm_params(model=config.BOOKING_MODEL)
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("choose") \
-            .set_text("Greet the caller and confirm the trip in the note. Call search_flights; it reads "
-                      "the options aloud. When they pick one, call hold_flight. If there's no trip on file, "
+            .set_text("Greet the caller and confirm the trip in the note. Call search_flights and read "
+                      "the numbered options. When they pick one, call hold_flight with its number. If there's no trip on file, "
                       "or they want to go back, call return_to_concierge.") \
             .set_functions(["search_flights", "hold_flight", "return_to_concierge"]) \
             .set_valid_steps([])
@@ -154,28 +155,32 @@ class BookingDesk(AgentBase):
         trip = (raw_data.get("global_data") or {}).get("trip")
         if not trip:
             return FunctionResult("There's no trip on file. Offer to go back to the concierge.")
-        options = self._options(trip)
-        if not options:
+        flights = self._options(trip)
+        if not flights:
             return FunctionResult(f"No flights to {trip['destination_name']} have {trip['travelers']} seats.")
-        listing = "; ".join(f"{f['id']} departing {spoken(f['depart'])}, ${f['price'] * trip['travelers']} "
-                            f"total for {trip['travelers']}" for f in options)
-        # The platform speaks the inventory verbatim, so the model can't paraphrase or invent flights.
-        return FunctionResult(f"The caller just heard these, word for word: {listing}. These are the only "
-                              "flights. Don't repeat or add any. Ask which one; then call hold_flight.") \
-            .say(f"Flights to {trip['destination_name']}: {listing}.")
+        # Code numbers the results and keeps them; the model only ever sees and picks an option number.
+        options = {str(n): f for n, f in enumerate(flights, 1)}
+        lines = " ".join(f"Option {n}: departing {spoken(f['depart'])}, ${f['price'] * trip['travelers']} "
+                         f"total for {trip['travelers']}." for n, f in options.items())
+        return FunctionResult(f"{lines} There are no other flights. Read these options, then call "
+                              "hold_flight with the option number the caller picks.") \
+            .update_global_data({"options": options})
 
-    @AgentBase.tool(name="hold_flight", description="Hold seats on one of the listed flights.",
-                    parameters={"type": "object", "required": ["flight_id"], "properties": {
-                        "flight_id": {"type": "string", "description": "e.g. FL-101"}}})
+    @AgentBase.tool(name="hold_flight", description="Hold seats on one option from search_flights.",
+                    parameters={"type": "object", "required": ["option"], "properties": {
+                        "option": {"type": "integer", "description": "The option number, e.g. 2"}}})
     def hold_flight(self, args, raw_data):
         gd = raw_data.get("global_data") or {}
-        trip = gd.get("trip")
+        trip, options = gd.get("trip"), gd.get("options") or {}
         if not trip:
             return FunctionResult("There's no trip on file. Offer to go back to the concierge.")
-        flight_id = str(args.get("flight_id") or "").strip().upper()
-        flight = next((f for f in self._options(trip) if f["id"] == flight_id), None)
-        if not flight:
-            return FunctionResult(f"{flight_id} isn't one of the available flights. Call search_flights.")
+        if not options:
+            return FunctionResult("Call search_flights first and read the options.")
+        flight = options.get(str(args.get("option")).strip())
+        if not flight or flight not in self._options(trip):          # the stored option, still bookable
+            return FunctionResult(f"Option {args.get('option')} isn't one of the options. "
+                                  f"Ask the caller to pick 1 to {len(options)}.")
+        flight_id = flight["id"]
         total = flight["price"] * trip["travelers"]
         booking = {"ref": f"R-{(gd.get('handoff_id') or 'direct')[:6].upper()}", "flight_id": flight_id,
                    "travelers": trip["travelers"], "total": total,
