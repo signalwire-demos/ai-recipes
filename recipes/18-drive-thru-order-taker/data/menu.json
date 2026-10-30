@@ -1,0 +1,38 @@
+{
+  "cheeseburger": {
+    "name": "Cheeseburger",
+    "sizes": {"single": 449, "double": 649},
+    "modifiers": {"no onions": 0, "no pickles": 0, "extra cheese": 50, "bacon": 100}
+  },
+  "chicken_sandwich": {
+    "name": "Chicken Sandwich",
+    "sizes": {"regular": 499},
+    "modifiers": {"spicy": 0, "no pickles": 0, "extra pickles": 0}
+  },
+  "fries": {
+    "name": "Fries",
+    "sizes": {"small": 199, "medium": 249, "large": 299},
+    "modifiers": {"no salt": 0}
+  },
+  "onion_rings": {
+    "name": "Onion Rings",
+    "sizes": {"small": 249, "large": 349},
+    "modifiers": {}
+  },
+  "soda": {
+    "name": "Soda",
+    "sizes": {"small": 149, "medium": 179, "large": 209},
+    "modifiers": {"no ice": 0}
+  },
+  "milkshake": {
+    "name": "Milkshake",
+    "sizes": {"regular": 349},
+    "modifiers": {"whipped cream": 0}
+  },
+  "burger_combo": {
+    "name": "Cheeseburger Combo",
+    "sizes": {"medium": 849, "large": 949},
+    "modifiers": {"no onions": 0, "no pickles": 0, "extra cheese": 50, "bacon": 100},
+    "combo": {"side": ["fries", "onion_rings"], "drink": ["soda", "milkshake"]}
+  }
+}
