@@ -1,0 +1,8 @@
+{
+  "debts": [
+    {"id": "DEBT-0101", "reference": "CA20417", "postal_code": "74101", "name": "Alex Moreno",
+     "creditor": "Example Electric", "balance": 1240.00, "days_past_due": 64},
+    {"id": "DEBT-0102", "reference": "CA20418", "postal_code": "74012", "name": "Priya Shah",
+     "creditor": "Example Wireless", "balance": 560.00, "days_past_due": 35}
+  ]
+}
