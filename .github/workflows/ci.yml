@@ -40,7 +40,7 @@ jobs:
           if grep -qE '^(scripts/|recipe\.schema\.yaml|\.github/workflows/)' <<<"$changed"; then
             changed="$changed"$'\n'"$(git ls-files recipes)"
           fi
-          recipes="$(grep -oE '^recipes/[^/]+/' <<<"$changed" | sort -u \
+          recipes="$({ grep -oE '^recipes/[^/]+/' <<<"$changed" || true; } | sort -u \
             | while read -r d; do [[ -d "$d" ]] && echo "${d%/}"; done \
             | jq -R . | jq -sc .)"
           swml="$(git ls-files '*.swml.yaml' '*.swml.json' | jq -R . | jq -sc .)"
