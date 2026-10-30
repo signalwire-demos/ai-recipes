@@ -1,0 +1,11 @@
+id: 00-template
+title: Recipe Template (Office Hours Line)
+group: A
+capability: [voice, ai-agent]
+language: python
+difficulty: beginner
+size: S
+status: template
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data]
+channels: [voice]
+external: []

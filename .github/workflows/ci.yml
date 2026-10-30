@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  APP_LINE_WARN: "220"
+
+jobs:
+  changes:
+    name: Find changed recipes
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.find.outputs.recipes }}
+      swml: ${{ steps.find.outputs.swml }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: find
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base" 2>/dev/null; then
+            changed="$(git ls-files)"            # first push: check everything
+          else
+            changed="$(git diff --name-only "$base" HEAD)"
+          fi
+          # Shared tooling changed: re-check every recipe.
+          if grep -qE '^(scripts/|recipe\.schema\.yaml|\.github/workflows/)' <<<"$changed"; then
+            changed="$changed"$'\n'"$(git ls-files recipes)"
+          fi
+          recipes="$(grep -oE '^recipes/[^/]+/' <<<"$changed" | sort -u \
+            | while read -r d; do [[ -d "$d" ]] && echo "${d%/}"; done \
+            | jq -R . | jq -sc .)"
+          swml="$(git ls-files '*.swml.yaml' '*.swml.json' | jq -R . | jq -sc .)"
+          echo "recipes=${recipes:-[]}" >> "$GITHUB_OUTPUT"
+          echo "swml=${swml:-[]}" >> "$GITHUB_OUTPUT"
+          echo "changed recipes: ${recipes:-[]}"
+
+  recipe:
+    name: ${{ matrix.recipe }}
+    needs: changes
+    if: needs.changes.outputs.recipes != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJson(needs.changes.outputs.recipes) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Tooling venv
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q -r scripts/requirements.txt
+
+      - name: Validate recipe.yaml
+        run: .venv/bin/python scripts/validate_manifests.py "${{ matrix.recipe }}"
+
+      - name: Check README sections
+        run: .venv/bin/python scripts/check_readme.py "${{ matrix.recipe }}"
+
+      - name: App line count
+        run: |
+          app="${{ matrix.recipe }}/app.py"
+          [[ -f "$app" ]] || { echo "no app.py (SWML-only recipe)"; exit 0; }
+          n=$(wc -l < "$app")
+          echo "app.py: $n lines"
+          if (( n > APP_LINE_WARN )); then
+            echo "::warning file=$app::app.py is $n lines (over $APP_LINE_WARN). Split it."
+          fi
+
+      - name: Recipe venv + pip install
+        if: hashFiles(format('{0}/requirements.txt', matrix.recipe)) != ''
+        working-directory: ${{ matrix.recipe }}
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt
+          grep -qx 'signalwire-sdk==3.7.5' requirements.txt \
+            || { echo "::error file=${{ matrix.recipe }}/requirements.txt::must pin signalwire-sdk==3.7.5"; exit 1; }
+
+      - name: pytest
+        if: hashFiles(format('{0}/tests/*.py', matrix.recipe)) != ''
+        working-directory: ${{ matrix.recipe }}
+        run: |
+          .venv/bin/pip install -q pytest
+          .venv/bin/python -m pytest -q
+
+      - name: swaig-test list tools + dump SWML
+        if: hashFiles(format('{0}/app.py', matrix.recipe)) != ''
+        working-directory: ${{ matrix.recipe }}
+        run: |
+          .venv/bin/swaig-test app.py --list-tools
+          .venv/bin/swaig-test app.py --dump-swml --raw > swml-dump.json
+          python -c "import json; d=json.load(open('swml-dump.json')); assert 'sections' in d; print('SWML ok:', [list(v)[0] for v in d['sections']['main']])"
+
+      - name: Upload SWML dump
+        if: hashFiles(format('{0}/swml-dump.json', matrix.recipe)) != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: swml-${{ strategy.job-index }}
+          path: ${{ matrix.recipe }}/swml-dump.json
+
+  swml-schema:
+    name: Validate *.swml.yaml
+    needs: changes
+    if: needs.changes.outputs.swml != '[]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: |
+          python -m venv .venv && .venv/bin/pip install -q -r scripts/requirements.txt
+          git ls-files '*.swml.yaml' '*.swml.json' | xargs .venv/bin/python scripts/validate_swml.py
+
+  repo:
+    name: Repo checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: python -m venv .venv && .venv/bin/pip install -q -r scripts/requirements.txt
+      - name: No .env files committed
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$'; then echo "::error::a .env file is committed"; exit 1; fi
+      - name: README index up to date (warning only; the lead regenerates it after merges)
+        run: |
+          .venv/bin/python scripts/build_index.py --check \
+            || echo "::warning file=README.md::recipe index is stale; run python scripts/build_index.py"
+      - name: Pattern tests
+        run: |
+          if compgen -G "patterns/*/test_*.py" > /dev/null; then
+            .venv/bin/pip install -q pytest && .venv/bin/python -m pytest -q patterns/
+          else
+            echo "no patterns yet"
+          fi
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The gitleaks CLI in a container: gitleaks/gitleaks-action@v2 needs a GITLEAKS_LICENSE
+      # secret for organization repos, the CLI does not.
+      - name: gitleaks detect
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.18.4 \
+            detect --source=/repo --redact --verbose --no-banner

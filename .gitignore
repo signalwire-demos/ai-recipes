@@ -1,0 +1,38 @@
+# Secrets: never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Search index build caches (commit only the final data/*.swsearch a recipe ships)
+*.swsearch-journal
+*.swsearch.tmp
+.swsearch_cache/
+search_cache/
+
+# Live-call slot lock (scripts/live_slot.sh)
+.live-lock/
+
+# Runtime output from recipes and smoke calls
+logs/
+*.log
+recipes/*/data/runtime/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,4 @@
+# Tooling for scripts/ (validate_manifests, smoke_call, readme index). Recipes have their own requirements.txt.
+signalwire-sdk==3.7.5
+PyYAML==6.0.3
+jsonschema==4.25.1

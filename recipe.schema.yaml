@@ -1,0 +1,57 @@
+# JSON Schema (draft 2020-12), written in YAML, for recipes/<nn-slug>/recipe.yaml.
+# Validate with: python scripts/validate_manifests.py [recipes/<nn-slug> ...]
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://github.com/signalwire-demos/ai-recipes/recipe.schema.yaml
+title: AI recipe manifest
+type: object
+additionalProperties: false
+required: [id, title, group, capability, language, difficulty, size, status, primitives, channels, external]
+properties:
+  id:
+    description: Folder name. Two-digit recipe number, then a kebab-case slug. Must equal the folder name.
+    type: string
+    pattern: "^[0-9]{2}-[a-z0-9]+(-[a-z0-9]+)*$"
+  title:
+    type: string
+    minLength: 3
+    maxLength: 80
+  group:
+    description: "A start here, B production apps, C copilots and chat, D integrations, E patterns"
+    enum: [A, B, C, D, E]
+  capability:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      enum: [voice, sms, chat, ai-agent, swml, rest, mcp, skills, search, transcription, payments, outbound, multi-agent, multi-tenant, multilingual, analytics]
+  language:
+    enum: [python, swml, typescript]
+  difficulty:
+    enum: [beginner, intermediate, advanced]
+  size:
+    enum: [S, M, L]
+  status:
+    description: Plan status, lowercased. "template" is reserved for recipes/_template.
+    enum: [ready, exists, confirm, blocked, proposed, template]
+  primitives:
+    description: >-
+      SDK and SWML features the recipe demonstrates. Known names are checked against the
+      app code by validate_manifests.py; other snake/kebab-case names are allowed.
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      pattern: "^[a-z][a-z0-9_-]*$"
+  channels:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      enum: [voice, sms, web, mcp]
+  external:
+    description: Third-party accounts needed. Empty when the recipe runs on bundled mocks.
+    type: array
+    uniqueItems: true
+    items:
+      type: string
