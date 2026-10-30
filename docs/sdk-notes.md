@@ -504,3 +504,17 @@ Response objects are plain dicts (TypedDicts). `from_` has a trailing underscore
 - `AIChatClient` builds `https://{SIGNALWIRE_SPACE}.signalwire.com/api/ai/chat`. Our `.env` stores the full host (`example.signalwire.com`), which produces `...signalwire.com.signalwire.com` and fails TLS. Pass the API URL explicitly (see `CHAT_API_URL` in recipes 27/28).
 - An unhandled `ChatGateway` error returns a plain-text 500 on `start`, `log` and `end`. Add a JSON error handler if a browser widget calls it.
 - `agent.mount(...)` is the supported way to add extra routes (`/sms`, `/pay`, static pages) next to the agent.
+
+## Gotchas found in live testing
+
+- `native_vector_search`: its `similarity_threshold` lets keyword-only hits through ("states" matched the 10DLC page). Gate on each result's `vector_score` in a `response_format_callback` (`grounded_only()` in recipes/02 `app.py`).
+- `native_vector_search`: `skip_prompt` is ignored; the skill still adds its "try another knowledge source" section. Create the `Knowledge Search` section yourself first (recipes/02).
+- `[search-queryonly]` is not lighter than `[search]`: in 3.7.5 both pull numpy, scikit-learn, nltk and sentence-transformers. On Linux and CI add `--extra-index-url https://download.pytorch.org/whl/cpu`, or pip pulls the multi-GB CUDA torch (recipes/02 `requirements.txt`).
+- `swaig-test --route /` can't select an agent an `AgentServer` registered at `/`: it exits 1, and with `--dump-swml --raw` prints nothing at all. Use `--agent-class <Class>` (recipes/15, 34).
+- `swaig-test --env KEY=VAL` is applied after `config.py` has already read the environment, so module-level knobs miss it. Set the variable in the shell instead (recipes/19 README).
+- Live-transcription webhook body: `call_info.call_id`, `channel_data.call_answer_date` (µs) and `utterance{role, content, timestamp (µs), utterance_id}`; at hangup one more body carries `transcribe.conversation_log`. Only final utterances arrived live (recipes/21 `adapter.py`).
+- `swml_transfer(final=False)` to another AI agent fails: the platform fetched the target's SWML, rejected its `ai` with `calling.error` 409 "Wait for ai to finish", and the call ended (call `94171698-68af-4373-bac8-48ee31fbf981`). `final=True` both ways works (recipes/16).
+- The platform POSTs `/post_prompt` at hangup even when no post_prompt is configured; recipes 09, 16 and 33 logged it (401 or 404). Harmless, but expect it in the access log.
+- 3.7.5 always renders the `ai` block. For an AI-free SWML path, override `render_document()` and return your own SWML (recipes/19 `app.py`, office-hours branch).
+- Extra routes on an `AgentBase`: `self.mount(router)` or `self.mount(router, prefix=...)` (recipes/27, 28, 29, 30) or override `_register_routes(router)` and call `super()` (recipes/09, 10).
+- Repo ops: `gh pr merge` hit GraphQL 502s on this repo. `gh api -X PUT repos/<owner>/<repo>/pulls/N/merge -f merge_method=squash` worked.

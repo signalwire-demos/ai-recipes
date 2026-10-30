@@ -14,6 +14,9 @@
 #
 # Port guard: after taking the lock, if anything is already listening on $LIVE_PORT (default
 # 3000), the slot refuses to run and prints what that listener is. Nothing is ever killed.
+#
+# The lock is released on exit, HUP, INT, PIPE and TERM, so piping the output into head or tail
+# is safe.
 set -euo pipefail
 
 LOCK_DIR="${LIVE_LOCK_DIR:-$HOME/workdir/demos/.live-lock}"
@@ -67,10 +70,19 @@ done
 
 cleanup() {
   [[ -n "${hb_pid:-}" ]] && kill "$hb_pid" 2>/dev/null || true
-  # Only remove the lock if it is still ours.
-  [[ "$(holder_field pid)" == "$$" ]] && rm -rf "$LOCK_DIR"
+  # Only remove the lock if it is still ours. No $(...) and no output here: after a write to a
+  # closed pipe, macOS bash 3.2 flushes the failed echo's buffer into the next command
+  # substitution, so "$(holder_field pid)" no longer equals $$ and the lock was left behind.
+  if grep -qx "pid=$$" "$LOCK_DIR/holder" 2>/dev/null; then rm -rf "$LOCK_DIR"; fi
+  return 0
 }
-trap cleanup EXIT INT TERM
+# Release the lock on every exit path. bash skips the EXIT trap when an untrapped signal kills
+# it, e.g. SIGPIPE once `| head -1` has closed the pipe, or SIGHUP when the terminal goes away.
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 141' PIPE
+trap 'exit 143' TERM
 
 cat > "$LOCK_DIR/holder" <<EOF
 recipe=$recipe
@@ -92,7 +104,8 @@ if [[ -n "$listener" ]]; then
   exit 69
 fi
 
-( while sleep 60; do touch "$LOCK_DIR/holder" 2>/dev/null || exit 0; done ) &
+# Detached from stdout/stderr so a `| tail` reader is not kept waiting on its sleep.
+( while sleep 60; do touch "$LOCK_DIR/holder" 2>/dev/null || exit 0; done ) >/dev/null 2>&1 &
 hb_pid=$!
 
 echo "live_slot: slot acquired for $recipe; running: $*" >&2
@@ -100,5 +113,5 @@ set +e
 "$@"
 rc=$?
 set -e
-echo "live_slot: command exited $rc; releasing slot" >&2
+echo "live_slot: command exited $rc; releasing slot" >&2 || true
 exit $rc
