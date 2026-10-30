@@ -8,6 +8,7 @@ full results on a web page; the model gets only what it needs to keep advising.
 import asyncio
 import base64
 import json
+import re
 import secrets
 import threading
 import time
@@ -28,6 +29,19 @@ REFUSED = "Credit not issued. The reason is on the rep's screen. Call sidecar_sk
 def load_orders() -> dict:
     """The order backend. Replace with a call to your order API."""
     return json.loads(config.ORDERS_FILE.read_text())["orders"]
+
+
+def resolve_order_id(raw) -> str:
+    """The order ID as heard. Speech-to-text writes "A 1002" as "eight one zero zero two" or
+    "81002" (live call 7639199e), so when there's no exact match, a unique order whose number
+    ends the digits that were heard is used. Anything else is returned as given and not found."""
+    order_id = str(raw or "").strip().upper()
+    orders = load_orders()
+    if order_id in orders:
+        return order_id
+    digits = re.sub(r"\D", "", order_id)
+    hits = [k for k in orders if digits and len(re.sub(r"\D", "", k)) >= 4 and digits.endswith(re.sub(r"\D", "", k))]
+    return hits[0] if len(hits) == 1 else order_id
 
 
 def credited_orders() -> set:
@@ -102,17 +116,18 @@ class SupportCopilot(SWMLService):
         return cfg
 
     def lookup_order(self, args, raw_data):
-        order_id = str(args.get("order_id", "")).strip().upper()
+        order_id = resolve_order_id(args.get("order_id"))
         call_id = (raw_data or {}).get("call_id", "unknown")
         order = load_orders().get(order_id)
         if not order:
             self.feed.push({"kind": "order", "order_id": order_id, "found": False, "call_id": call_id})
-            return FunctionResult(f"No order {order_id}. Suggest the rep confirms the number.")
+            return FunctionResult(f"No order {order_id}. The rep's screen shows this. Call sidecar_skip.")
         self.feed.push({"kind": "order", "order_id": order_id, "found": True, "call_id": call_id, **order})
         # The model gets status, items and total; the customer's phone and the notes stay on the rep's screen.
         eta = f", expected {order['eta']}" if order.get("eta") else ""
         return FunctionResult(f"Order {order_id}: {order['status']}{eta}. Items: {', '.join(order['items'])}. "
-                              f"Total {order['total']:.2f} {config.CURRENCY}.")
+                              f"Total {order['total']:.2f} {config.CURRENCY}. The rep's screen has the order. "
+                              "Call sidecar_skip.")
 
     def credit_refusal(self, order_id: str, amount: float) -> str | None:
         """Return why a credit must be refused, or None. The rules the model never sees."""
@@ -130,7 +145,7 @@ class SupportCopilot(SWMLService):
         return None
 
     def issue_credit(self, args, raw_data):
-        order_id = str(args.get("order_id", "")).strip().upper()
+        order_id = resolve_order_id(args.get("order_id"))
         call_id = (raw_data or {}).get("call_id", "unknown")
         reason = str(args.get("reason", "")).strip()[:200]
         try:

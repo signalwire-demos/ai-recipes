@@ -65,6 +65,23 @@ def test_lookup_order_keeps_phone_and_notes_from_the_model(svc):
     assert "+15550111" not in response and "scratched" not in response
 
 
+@pytest.mark.parametrize("heard", ["81002", "8 1 0 0 2", "a1002", "A 1002"])
+def test_order_id_as_speech_to_text_writes_it(svc, heard):
+    """Live call 7639199e: "A 1 0 0 2" was transcribed as "eight one zero zero two"."""
+    svc.lookup_order({"order_id": heard}, {})
+    assert last_card(svc)["order_id"] == "A-1002" and last_card(svc)["found"]
+
+
+def test_lookup_tells_the_model_to_skip():
+    """Live call 7639199e: after lookup_order the sidecar's next model reply (a text insight)
+    errored, and every later tick errored too (error_count 4), so issue_credit never ran.
+    The tool response ends the tick with sidecar_skip, as #23's tool does."""
+    from app import SupportCopilot
+    svc = SupportCopilot()
+    for order_id in ("A-1001", "Z-9999"):
+        assert svc.lookup_order({"order_id": order_id}, {}).to_dict()["response"].endswith("Call sidecar_skip.")
+
+
 def test_lookup_order_not_found(svc):
     response = svc.lookup_order({"order_id": "Z-9999"}, {}).to_dict()["response"]
     assert "No order Z-9999" in response and last_card(svc)["found"] is False
