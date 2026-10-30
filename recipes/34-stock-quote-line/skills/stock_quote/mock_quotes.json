@@ -1,0 +1,7 @@
+{
+  "ACME": {"name": "Acme Corporation", "price": 101.25, "change": 1.19, "change_pct": 1.19},
+  "GLBX": {"name": "Globex Industries", "price": 48.6, "change": -0.74, "change_pct": -1.5},
+  "INIT": {"name": "Initech", "price": 12.05, "change": 0.0, "change_pct": 0.0},
+  "UMBR": {"name": "Umbrella Holdings", "price": 233.4, "change": 3.1, "change_pct": 1.35},
+  "WAYN": {"name": "Wayne Enterprises", "price": 517.88, "change": -6.42, "change_pct": -1.22}
+}
