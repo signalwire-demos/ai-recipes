@@ -49,12 +49,21 @@ def test_valid_answers_are_normalized_and_written(agent):
 
 @pytest.mark.parametrize("qid,response", [
     ("likely_to_recommend", "11"), ("likely_to_recommend", "0"), ("likely_to_recommend", "great"),
+    ("likely_to_recommend", "eleven"), ("likely_to_recommend", "twelve"),
     ("best_part", "parking"), ("issue_resolved", "maybe"), ("no_such_question", "yes"),
 ])
 def test_invalid_answers_are_refused_and_not_written(agent, qid, response):
     result = agent.log_response({"question_id": qid, "response": response}, {"call_id": "c2"})
     assert result.to_dict()["response"].startswith(("Not recorded", "Unknown question"))
     assert rows() == []
+
+
+@pytest.mark.parametrize("spoken,value", [
+    ("nine", 9), ("Nine.", 9), ("ten", 10), ("a seven out of ten", 7), ("9 out of 10", 9), ("8.0", 8),
+])
+def test_rating_spoken_as_a_word_is_accepted(spoken, value):
+    # Regression: live call 46145b42 sent log_response("nine") and the handler refused it.
+    assert normalize(Q["likely_to_recommend"], spoken) == (value, None)
 
 
 def test_optional_open_question_accepts_empty(agent):
