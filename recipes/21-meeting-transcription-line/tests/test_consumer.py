@@ -39,12 +39,11 @@ def client(svc, store):
 
 
 def test_webhook_stores_and_merges(client, store, auth, meeting_events):
-    for body in meeting_events:
-        r = client.post("/transcript", json=body, headers=auth)
-        assert r.status_code == 200 and r.json()["segments"] == 1
+    counts = [client.post("/transcript", json=b, headers=auth).json()["segments"] for b in meeting_events]
+    assert counts == [1, 1, 1, 1, 0]  # the conversation_log at hangup is stored raw only
     assert client.get("/calls", headers=auth).json() == {"calls": [CALL]}
     segs = client.get(f"/calls/{CALL}", headers=auth).json()["segments"]
-    assert [s["is_final"] for s in segs] == [True, True, True, False]
+    assert [s["speaker"] for s in segs] == ["local-caller", "local-caller", "remote-caller", "remote-caller"]
     assert all("delay_ms" in s for s in segs)
     raw = (store.root / f"{CALL}.raw.jsonl").read_text().splitlines()
     assert len(raw) == len(meeting_events)  # every raw body is kept for the payload TODO
@@ -93,9 +92,9 @@ def test_sse_rebroadcasts_segments(svc, store, auth, meeting_events):
             assert r.headers["content-type"].startswith("text/event-stream")
             lines = r.iter_lines()
             replayed = json.loads(next(l for l in lines if l.startswith("data: "))[6:])
-            assert replayed["text"].startswith("Good morning everyone")
+            assert replayed["text"].startswith("Good morning, everyone")
             httpx.post(f"{base}/transcript", json=meeting_events[3], headers=auth)  # live
             live = json.loads(next(l for l in lines if l.startswith("data: "))[6:])
-            assert (live["speaker"], live["is_final"], live["text"]) == ("local-caller", False, "Thanks")
+            assert (live["speaker"], live["text"]) == ("remote-caller", "First item is the launch date.")
     finally:
         server.should_exit = True

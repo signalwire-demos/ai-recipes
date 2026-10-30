@@ -20,7 +20,7 @@ The transcript goes to your code first, and the call flow is code, not a prompt.
 points its webhook at your own authenticated endpoint. The SWML has no `ai` verb: no model is in
 the call path, and nothing reads the transcript before it lands in your storage. Every consumer
 route needs the same basic auth as the SWML route. All knowledge of the event payload lives in one
-function, `parse_event()` in `adapter.py`, and every raw body is kept next to the parsed segments.
+function, `parse_event()` in `adapter.py`. Every raw body is kept next to the parsed segments.
 
 ```mermaid
 stateDiagram-v2
@@ -43,14 +43,20 @@ stateDiagram-v2
 | Payload adapter (the one place that knows the event shape) | `adapter.py`, `parse_event()` |
 | Partial/final merge, per-call store, SSE fan-out | `consumer.py`, `merge()`, `TranscriptStore`, `Broker` |
 
-### What is not confirmed yet
+### The event payload
 
-- `TODO(blocked: payload undocumented)`. The docs say only that "partial results are sent as they
-  occur". The fixtures in `data/fixtures/` are a best guess built from the closest documented
-  callback (`ai_sidecar`: a `call_info` envelope, an event with `type` and a microsecond `ts`) and
-  the Deepgram field names. After your first live call, open
-  `data/runtime/transcripts/<call_id>.raw.jsonl`, compare it with the fixtures, and trim
-  `adapter.py` to the real fields.
+The docs don't publish the webhook body. `adapter.py` is written against bodies captured from a
+live call on 2026-10-30. Each spoken utterance arrives as one final result:
+`{"call_info": {"call_id"}, "channel_data": {"content_disposition": "transcribe.utterance",
+"call_answer_date"}, "utterance": {"role", "content", "timestamp", "utterance_id", "confidence"}}`.
+Timestamps are in microseconds, and they measured 80 to 300 ms ahead of arrival. At hangup, one
+`transcribe.conversation_log` body repeats the whole conversation. It is stored raw and not
+re-parsed. The fixtures in `data/fixtures/` use that shape with fake IDs and 555-01xx numbers.
+The `play` greeting is transcribed too, as `local-caller`.
+
+- `TODO(blocked: partial events not observed)`. With `live_events: true`, the live call delivered
+  only final utterances. `partials-synthetic.jsonl` is a guess (`"is_final": false`, sharing the
+  final's `utterance_id`) that keeps the partial merge path tested.
 - `TODO(blocked: conference behavior undocumented)`. The plan calls for a conference. No source
   documents `live_transcribe` on a leg inside `join_conference`, so this version is a single-call
   dial-in. The seam is the `connect` branch in `build_swml()`.
