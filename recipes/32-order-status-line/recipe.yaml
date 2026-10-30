@@ -1,0 +1,11 @@
+id: 32-order-status-line
+title: AI Order Status Line
+group: D
+capability: [voice, ai-agent]
+language: python
+difficulty: intermediate
+size: M
+status: ready
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, connect, data-projection]
+channels: [voice]
+external: []

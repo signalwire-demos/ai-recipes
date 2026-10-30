@@ -1,0 +1,26 @@
+{
+  "orders": [
+    {
+      "id": "ORD-0101", "order_number": "100234", "postal_code": "74101",
+      "customer_name": "Taylor Brooks", "status": "out for delivery", "eta": "today by 8 PM",
+      "items": [{"name": "trail running shoes", "qty": 1, "price": 89.00},
+                {"name": "wool socks", "qty": 2, "price": 12.50}],
+      "total": 114.00, "risk_flag": false, "prior_refunds": 0,
+      "internal_notes": "VIP segment. Upsell insoles."
+    },
+    {
+      "id": "ORD-0102", "order_number": "100235", "postal_code": "74012",
+      "customer_name": "Morgan Lee", "status": "delayed", "eta": "next Tuesday",
+      "items": [{"name": "insulated water bottle", "qty": 1, "price": 24.00}],
+      "total": 24.00, "risk_flag": false, "prior_refunds": 1,
+      "internal_notes": "Carrier exception at hub."
+    },
+    {
+      "id": "ORD-0103", "order_number": "100236", "postal_code": "74133",
+      "customer_name": "Casey Nguyen", "status": "delivered", "eta": "delivered on October 27",
+      "items": [{"name": "headlamp", "qty": 1, "price": 32.00}],
+      "total": 32.00, "risk_flag": true, "prior_refunds": 4,
+      "internal_notes": "Three not-received claims this year. Manual review only."
+    }
+  ]
+}
