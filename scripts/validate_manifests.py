@@ -52,6 +52,7 @@ KNOWN_PRIMITIVES = {
     "rest-dial": r"calling\.dial\(",
     "agent-server": r"AgentServer\(",
     "set_prompt_llm_params": r"set_prompt_llm_params\(",
+    "ai_sidecar": r"ai_sidecar",
 }
 
 
