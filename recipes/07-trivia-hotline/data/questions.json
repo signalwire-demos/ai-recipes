@@ -1,0 +1,12 @@
+[
+  {"id": "q01", "question": "Which planet is known as the Red Planet?", "answers": ["Mars"]},
+  {"id": "q02", "question": "What is the largest ocean on Earth?", "answers": ["Pacific", "Pacific Ocean"]},
+  {"id": "q03", "question": "Which gas do plants take in from the air to make food?", "answers": ["carbon dioxide", "CO2"]},
+  {"id": "q04", "question": "Who wrote the play Romeo and Juliet?", "answers": ["William Shakespeare", "Shakespeare"]},
+  {"id": "q05", "question": "What is the capital city of Japan?", "answers": ["Tokyo"]},
+  {"id": "q06", "question": "What is the hardest natural material?", "answers": ["diamond", "diamonds"]},
+  {"id": "q07", "question": "Which big cat is called the king of the jungle?", "answers": ["lion"]},
+  {"id": "q08", "question": "In which country are the pyramids of Giza?", "answers": ["Egypt"]},
+  {"id": "q09", "question": "What is the tallest mountain above sea level?", "answers": ["Mount Everest", "Everest"]},
+  {"id": "q10", "question": "Which instrument has eighty-eight keys?", "answers": ["piano"]}
+]
