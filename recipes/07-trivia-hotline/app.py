@@ -83,7 +83,12 @@ class TriviaAgent(AgentBase):
                 f"The game is over. Tell the caller they scored ${{global_data.score}} out "
                 f"of {config.ROUNDS}, thank them for playing and say goodbye."
             ) \
-            .set_functions([])  # explicit: zero tools (steps inherit tools otherwise)
+            .set_functions([]) \
+            .set_valid_steps([]) \
+            .set_end(True)
+        # zero tools (steps inherit them otherwise), and no next_step: without valid_steps the
+        # platform offers next_step to "next", which doesn't exist after the last step. Live call
+        # 943ed374 looped on next_step("next") and then on hangup before it said goodbye.
 
     def start_game(self, query_params, body_params, headers, agent) -> None:
         """Per call: pick this call's questions and put the first one in global_data."""

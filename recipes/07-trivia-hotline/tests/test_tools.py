@@ -185,6 +185,13 @@ def test_governance_final_score_has_no_tools(swml):
     assert steps_of(swml)["final_score"]["functions"] == []
 
 
+def test_governance_final_score_has_no_next_step(swml):
+    # Regression: live call 943ed374. Without valid_steps the model got next_step("next") on the
+    # last step, hit "next not found" twice and looped. It is the end of the step flow.
+    final = steps_of(swml)["final_score"]
+    assert final["valid_steps"] == [] and final["end"] is True
+
+
 def test_governance_play_step_only_submits(swml):
     play = steps_of(swml)["play"]
     assert play["functions"] == ["submit_answer"]

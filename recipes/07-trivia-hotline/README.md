@@ -18,7 +18,7 @@ matching), writes the new round, score and next question back into `global_data`
 `ROUNDS` questions calls `swml_change_step("final_score")`. Every call to `submit_answer`
 moves on a round, so the model can't retry or probe for an answer. `play` has
 `valid_steps=[]`, so only the handler can end the game, and `final_score` has
-`set_functions([])`. The tests check that no accepted answer appears anywhere in the dumped
+`set_functions([])`, `valid_steps=[]` and `set_end(True)`. The tests check that no accepted answer appears anywhere in the dumped
 SWML (prompt, steps, `global_data`) or in any `global_data` the handler writes.
 
 ```mermaid
@@ -28,14 +28,14 @@ stateDiagram-v2
     play --> final_score: submit_answer handler after ROUNDS, swml_change_step
     final_score --> [*]
     note right of play: tools = [submit_answer], valid_steps = [], sees global_data.question only
-    note right of final_score: tools = [], reads global_data.score
+    note right of final_score: tools = [], valid_steps = [], end, reads global_data.score
 ```
 
 | Primitive | Where |
 |---|---|
 | `define_contexts` / `add_step` | `app.py`, `TriviaAgent.__init__` |
 | `set_functions(["submit_answer"])`, `set_valid_steps([])` | `app.py`, step `play` |
-| `set_functions([])` | `app.py`, step `final_score` |
+| `set_functions([])`, `set_valid_steps([])`, `set_end(True)` | `app.py`, step `final_score` |
 | `${global_data.question}`, `${global_data.score}` in step text | `app.py`, steps `play` and `final_score` |
 | `update_global_data` + `swml_change_step` | `app.py`, `submit_answer` handler |
 | `set_dynamic_config_callback` (per-call question order) | `app.py`, `start_game` |
@@ -83,6 +83,16 @@ swaig-test app.py \
 On the call, play it straight. Then try to break it: ask the host for the answer (it doesn't
 have it), answer with a typo or extra words ("I think it's Shakespear"), or say "I don't know"
 (that counts as a miss and the game moves on).
+
+Live-tested 2026-10-30 with a scripted caller and the shuffle off (questions q01 to q05). The
+handler graded Mars (right), "The Atlantic" (wrong, revealed Pacific), carbon dioxide (right),
+"I think it's Shakespeare" (right) and "I give up" (wrong). It kept round and score in
+`global_data`, and after round 5 moved the call `play -> final_score (webhook_action)`. The host
+said "You scored 3 out of 5" and hung up once (call `4cc505fa-f590-4daf-9be0-afdf7aef17bf`, 82 s).
+The first call (`943ed374-2854-4a80-8e40-996e249098fe`) scored the same, but `final_score` had no
+`valid_steps`. The platform then offered `next_step`, and the model called `next_step("next")`
+twice ("next not found"). After that it looped on hangup (function-loop detector) before it said
+goodbye. `final_score` now declares `valid_steps=[]` and `end`.
 
 ## Deploy
 
