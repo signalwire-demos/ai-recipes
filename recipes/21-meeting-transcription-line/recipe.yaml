@@ -1,0 +1,11 @@
+id: 21-meeting-transcription-line
+title: AI Meeting Transcription Line
+group: C
+capability: [voice, swml, transcription]
+language: python
+difficulty: intermediate
+size: M
+status: confirm
+primitives: [swml-service, live_transcribe, live-events-webhook, transcript-consumer, sse]
+channels: [voice, web]
+external: []

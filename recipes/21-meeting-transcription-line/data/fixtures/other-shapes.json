@@ -1,0 +1,28 @@
+[
+ {
+  "call_id": "flat-0001",
+  "channel": "remote-caller",
+  "transcript": "Hello there",
+  "is_final": false,
+  "timestamp": 1793000010000
+ },
+ {
+  "call_id": "flat-0001",
+  "channel": "remote-caller",
+  "alternatives": [
+   {
+    "transcript": "Hello there, team."
+   }
+  ],
+  "is_final": true,
+  "timestamp": "2026-10-26T09:33:30.500Z"
+ },
+ {
+  "call_info": {
+   "call_id": "flat-0001"
+  },
+  "event": {
+   "type": "summary"
+  }
+ }
+]
