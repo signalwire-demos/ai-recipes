@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "acme-support-line": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@0.15.2",
+        "https://YOUR-HOST/mcp",
+        "--header",
+        "Authorization:${AUTH_HEADER}",
+        "--transport",
+        "http-only"
+      ],
+      "env": {
+        "AUTH_HEADER": "Basic BASE64_OF_USER_COLON_PASSWORD"
+      }
+    }
+  }
+}
