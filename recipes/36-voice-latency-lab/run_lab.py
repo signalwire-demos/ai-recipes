@@ -14,6 +14,7 @@ SWML script that speaks config.CALLER_SCRIPT. After the call, the platform POSTs
 post-prompt payload to the app, which saves it under runs/<config>/; lab/ parses it.
 """
 import argparse
+import json
 import os
 import re
 import secrets
@@ -53,7 +54,7 @@ def start_app(env: dict, log: Path) -> subprocess.Popen:
     sys.exit(f"run_lab: app did not start; see {log}")
 
 
-def one_call(name: str, env: dict, log: Path) -> str | None:
+def one_call(name: str, env: dict, log: Path) -> tuple[str | None, list[Path]]:
     before = set((config.RUNS_DIR / name).glob("*.json"))
     cmd = [sys.executable, str(SMOKE), str(RECIPE), "--route", f"/?config={name}", "--log", str(log),
            "--pause", str(config.CALLER_PAUSE_SECS)]
@@ -63,17 +64,18 @@ def one_call(name: str, env: dict, log: Path) -> str | None:
     sid = (re.search(r"call SID:\s*(\S+)", proc.stdout) or [None, None])[1]
     if not sid:
         print(f"  {name}: no call placed: {(proc.stderr or proc.stdout).strip()[-300:]}", flush=True)
-        return None
+        return None, []
     deadline = time.time() + config.PAYLOAD_WAIT_SECS
     while time.time() < deadline and not set((config.RUNS_DIR / name).glob("*.json")) - before:
         time.sleep(2)
-    got = bool(set((config.RUNS_DIR / name).glob("*.json")) - before)
-    print(f"  {name}: call {sid or '?'} -> post-prompt {'saved' if got else 'MISSING'}", flush=True)
-    return sid
+    new = sorted(set((config.RUNS_DIR / name).glob("*.json")) - before)
+    print(f"  {name}: call {sid} -> post-prompt {'saved' if new else 'MISSING'}", flush=True)
+    return sid, new
 
 
-def write_report(runs_dir: Path, sids: dict[str, list] | None = None) -> str:
-    table = render(summarize(load_runs(runs_dir), list(config.CONFIGS)), config.CONFIGS)
+def write_report(runs: dict[str, list[dict]], sids: dict[str, list] | None = None) -> str:
+    attempted = {k: len([s for s in v if s]) for k, v in (sids or {}).items()}
+    table = render(summarize(runs, list(config.CONFIGS)), config.CONFIGS, attempted or None)
     if sids is not None:
         config.REPORTS_DIR.mkdir(parents=True, exist_ok=True)
         path = config.REPORTS_DIR / f"latency-{time.strftime('%Y%m%d-%H%M%S')}.md"
@@ -93,7 +95,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if args.report_only:
-        print(write_report(args.runs), end="")
+        print(write_report(load_runs(args.runs)), end="")
         return 0
 
     names = args.configs.split(",") if args.configs else list(config.CONFIGS)
@@ -109,16 +111,19 @@ def main() -> int:
     log = RECIPE / "logs" / f"lab-{time.strftime('%Y%m%d-%H%M%S')}.log"
     proc = start_app(env, log) if args.start else None
     sids: dict[str, list] = {n: [] for n in names}
+    runs: dict[str, list[dict]] = {}  # this run's payloads only
     try:
         for i in range(args.calls):  # interleave configs so time-of-day drift hits all equally
             print(f"round {i + 1}/{args.calls}", flush=True)
             for name in names:
-                sids[name].append(one_call(name, env, log))
+                sid, files = one_call(name, env, log)
+                sids[name].append(sid)
+                runs.setdefault(name, []).extend(json.loads(f.read_text()) for f in files)
     finally:
         if proc:
             proc.terminate()
             proc.wait(timeout=10)
-    print(write_report(config.RUNS_DIR, sids), end="")
+    print(write_report(runs, sids), end="")
     return 0
 
 

@@ -54,14 +54,21 @@ def _ms(v):
     return "n/a" if v is None else f"{v:.0f}"
 
 
-def render(rows: list[dict], matrix: dict[str, dict] | None = None) -> str:
-    """Markdown table. Same input -> byte-identical output (no timestamps, fixed order)."""
-    matrix = matrix or {}
+def render(rows: list[dict], matrix: dict[str, dict] | None = None, attempted: dict[str, int] | None = None) -> str:
+    """Markdown table. Same input -> byte-identical output (no timestamps, fixed order).
+
+    attempted: calls placed per config this run. A config whose calls produced no payload
+    still gets a row, so a failing configuration is visible instead of silently missing.
+    """
+    matrix, attempted = matrix or {}, attempted or {}
+    seen = {r["config"] for r in rows}
+    rows = rows + [{"config": n, "calls": 0, "turns": 0, "omitted": 0, **{s: (None, None) for s in SEGMENTS}}
+                   for n in attempted if n not in seen]
     head = ["Config", "Model", "Voice", "Calls", "Turns"] + [f"{LABELS[s]} p50 / p95 (ms)" for s in SEGMENTS]
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for r in rows:
         cfg = matrix.get(r["config"], {})
-        cells = [r["config"], cfg.get("model", "?"), cfg.get("voice", "?"), str(r["calls"]),
+        cells = [r["config"], cfg.get("model", "?"), cfg.get("voice", "?"), str(r["calls"]) + (f" of {attempted[r['config']]}" if r["config"] in attempted else ""),
                  f"{r['turns']}" + (f" ({r['omitted']} untimed)" if r["omitted"] else "")]
         cells += [f"{_ms(r[s][0])} / {_ms(r[s][1])}" for s in SEGMENTS]
         lines.append("| " + " | ".join(cells) + " |")

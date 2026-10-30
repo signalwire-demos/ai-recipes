@@ -108,3 +108,10 @@ def test_config_comes_from_payload_global_data(tmp_path):
     (tmp_path / "misfiled").mkdir()
     shutil.move(tmp_path / "x.json", tmp_path / "misfiled" / "x.json")
     assert list(load_runs(tmp_path)) == ["nano-rime"]
+
+
+def test_config_with_no_payload_is_shown_not_dropped():
+    rows = summarize(load_runs(FIXTURES / "runs"), list(config.CONFIGS))
+    table = render(rows, config.CONFIGS, {"nano-rime": 2, "mini-rime": 1, "nano-gcloud": 2})
+    assert "| nano-rime | gpt-4.1-nano | rime.spore | 2 of 2 |" in table
+    assert "| nano-gcloud | gpt-4.1-nano | gcloud.en-US-Neural2-F | 0 of 2 | 0 | n/a / n/a |" in table

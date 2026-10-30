@@ -124,7 +124,10 @@ python run_lab.py --report-only                             # rebuild the table 
 
 In the ai-recipes demo Space, run it inside the shared live-call slot:
 `scripts/live_slot.sh 36-voice-latency-lab -- recipes/36-voice-latency-lab/.venv/bin/python recipes/36-voice-latency-lab/run_lab.py --start --calls 10`.
-The table prints and is written to `reports/latency-<timestamp>.md`, along with the call SIDs.
+The table prints and is written to `reports/latency-<timestamp>.md`, along with the call SIDs. It
+covers that run's calls only. "Calls" reads `received of placed`, so a configuration whose calls
+produce no post-prompt report (a voice or model the Space can't open, say) shows up as `0 of N`
+instead of dropping out of the table.
 
 Without a phone:
 
