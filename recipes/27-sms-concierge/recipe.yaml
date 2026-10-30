@@ -1,0 +1,11 @@
+id: 27-sms-concierge
+title: AI SMS Concierge
+group: C
+capability: [voice, sms, chat, ai-agent]
+language: python
+difficulty: intermediate
+size: M
+status: confirm
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, ai-chat-client, laml-webhooks]
+channels: [voice, sms]
+external: []
