@@ -1,0 +1,11 @@
+id: 14-appointment-reminder-caller
+title: AI Appointment Reminder Caller
+group: B
+capability: [voice, ai-agent, outbound, rest]
+language: python
+difficulty: intermediate
+size: M
+status: confirm
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, dynamic-config, rest-dial]
+channels: [voice]
+external: []

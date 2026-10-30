@@ -1,0 +1,6 @@
+appointment_id,first_name,phone,timezone,consent
+A-0101,Jordan,+15550101,America/New_York,yes
+A-0102,Riley,+15550102,America/Chicago,no
+A-0103,Casey,+15550103,America/Los_Angeles,yes
+A-0104,Morgan,+15550104,America/Denver,yes
+A-0105,Avery,+15550105,Pacific/Honolulu,yes
