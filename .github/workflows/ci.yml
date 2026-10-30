@@ -93,7 +93,8 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install -q -r requirements.txt
-          grep -qx 'signalwire-sdk==3.7.5' requirements.txt \
+          # Extras are fine: signalwire-sdk[search]==3.7.5 counts as the pin.
+          grep -qE '^signalwire-sdk(\[[a-z0-9,-]+\])?==3\.7\.5[[:space:]]*(#.*)?$' requirements.txt \
             || { echo "::error file=${{ matrix.recipe }}/requirements.txt::must pin signalwire-sdk==3.7.5"; exit 1; }
 
       - name: pytest
