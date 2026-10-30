@@ -100,7 +100,7 @@ def test_report_is_stable_regardless_of_input_order(tmp_path):
 
 def test_report_follows_config_order_and_skips_configs_without_runs():
     rows = summarize(load_runs(FIXTURES / "runs"), list(config.CONFIGS))
-    assert [r["config"] for r in rows] == ["nano-rime", "mini-rime"]
+    assert [r["config"] for r in rows] == ["mini-rime", "nano-rime"]
 
 
 def test_config_comes_from_payload_global_data(tmp_path):
@@ -112,6 +112,14 @@ def test_config_comes_from_payload_global_data(tmp_path):
 
 def test_config_with_no_payload_is_shown_not_dropped():
     rows = summarize(load_runs(FIXTURES / "runs"), list(config.CONFIGS))
-    table = render(rows, config.CONFIGS, {"nano-rime": 2, "mini-rime": 1, "nano-gcloud": 2})
+    table = render(rows, config.CONFIGS, {"nano-rime": 2, "mini-rime": 1, "mini-gcloud": 2})
     assert "| nano-rime | gpt-4.1-nano | rime.spore | 2 of 2 |" in table
-    assert "| nano-gcloud | gpt-4.1-nano | gcloud.en-US-Neural2-F | 0 of 2 | 0 | n/a / n/a |" in table
+    assert "| mini-gcloud | gpt-4.1-mini | gcloud.en-US-Neural2-F | 0 of 2 | 0 | n/a / n/a |" in table
+
+
+def test_known_issue_is_printed_under_the_table():
+    rows = summarize(load_runs(FIXTURES / "runs"), list(config.CONFIGS))
+    table = render(rows, config.CONFIGS)
+    assert "Known issues:\n- nano-rime: gpt-4.1-nano fails on some platform nodes" in table
+    assert "- mini-rime:" not in table
+    assert "Known issues" not in render([r for r in rows if r["config"] == "mini-rime"], config.CONFIGS)

@@ -34,12 +34,20 @@ HOURS_FILE = HERE / "data" / "hours.json"
 
 # The configuration matrix. Each entry changes ONLY the LLM model and the TTS voice;
 # the prompt, tools and turn settings are identical, so the comparison is fair.
-# Pick one per call with ?config=<name>. The first entry is the default.
+# Pick one per call with ?config=<name>. The first entry is the default (the baseline).
+# "known_issue" is optional, never reaches the SWML, and is printed under the report table.
+GPT41_NANO_ISSUE = (
+    "gpt-4.1-nano fails on some platform nodes: the REST call log shows calling_error "
+    "model_not_found ('The model gpt-4.1-nano-2025-04-14 has been deprecated') on every "
+    "assistant turn, then no tool call and no post-prompt. Seen on 4 of 7 live calls on "
+    "2026-10-30, with both rime.spore and gcloud voices; gpt-4.1-mini never failed. "
+    "A failed call shows up as 'k of N' in Calls."
+)
 CONFIGS = {
-    "nano-rime":     {"model": "gpt-4.1-nano", "voice": "rime.spore"},
     "mini-rime":     {"model": "gpt-4.1-mini", "voice": "rime.spore"},
+    "nano-rime":     {"model": "gpt-4.1-nano", "voice": "rime.spore", "known_issue": GPT41_NANO_ISSUE},
     "oss120b-rime":  {"model": "gpt-oss-120b", "voice": "rime.spore"},
-    "nano-gcloud":   {"model": "gpt-4.1-nano", "voice": "gcloud.en-US-Neural2-F"},
+    "mini-gcloud":   {"model": "gpt-4.1-mini", "voice": "gcloud.en-US-Neural2-F"},
 }
 TEMPERATURE = 0.3                      # held constant across configs
 
