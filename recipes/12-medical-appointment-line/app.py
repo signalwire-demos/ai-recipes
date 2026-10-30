@@ -15,6 +15,7 @@ from signalwire import AgentBase, FunctionResult
 import config
 
 SLOT_ID = {"type": "string", "description": "Slot id from find_slots, e.g. S-0101"}
+CONSENT_ANSWERS = {"yes": True, "no": False}  # record_consent answer -> consent granted
 
 
 def load_slots() -> list[dict]:
@@ -46,8 +47,10 @@ class MedicalAppointmentAgent(AgentBase):
         ctx.add_step("consent") \
             .set_text(
                 f'Greet the caller, then read this disclosure word for word: "{config.DISCLOSURE_TEXT}" '
-                "When they answer, call record_consent with granted true or false. "
-                "Do not help with anything else until you have called it."
+                "As soon as they answer, call record_consent with answer yes or no. A no is a "
+                "complete answer: call record_consent with no, never ask them to reconsider, and "
+                "never say the call will be recorded anyway. Do not help with anything else until "
+                "you have called it."
             ) \
             .set_functions(["record_consent"]) \
             .set_valid_steps([])  # the only way out is the record_consent handler
@@ -68,22 +71,27 @@ class MedicalAppointmentAgent(AgentBase):
             .set_valid_steps([])
         ctx.add_step("wrap_up") \
             .set_text("Read back ${global_data.booking.summary}. Ask if there is anything else, then say goodbye.") \
-            .set_functions([])
+            .set_functions([]) \
+            .set_valid_steps([])  # last step: without this the model loops on next_step("next")
 
     # --- consent gate -----------------------------------------------------
 
     @AgentBase.tool(
         name="record_consent",
-        description="Record the caller's answer to the recording disclosure.",
+        description="Submit the caller's answer to the recording question, whether they agreed (yes) "
+                    "or declined (no). Call it for a no too: a no moves the call to the unrecorded path.",
         parameters={
             "type": "object",
-            "properties": {"granted": {"type": "boolean", "description": "True if the caller agreed"}},
-            "required": ["granted"],
+            "properties": {"answer": {"type": "string", "enum": list(CONSENT_ANSWERS),
+                                      "description": "yes = agreed to recording, no = declined"}},
+            "required": ["answer"],
         },
     )
     def record_consent(self, args, raw_data):
-        granted = args.get("granted")
-        if not isinstance(granted, bool):  # anything ambiguous is not consent, and not a refusal yet
+        # A live call showed the model would not pass granted=false for a "no" (it kept re-asking),
+        # so the answer is an explicit yes/no enum. Anything else is not consent, and not a refusal yet.
+        granted = CONSENT_ANSWERS.get(str(args.get("answer", "")).strip().lower())
+        if granted is None:
             return FunctionResult("I didn't catch a clear yes or no. Ask the caller again.")
         consent = {"granted": granted, "time": now_iso(), "disclosure_version": config.DISCLOSURE_VERSION}
         if not granted:
