@@ -1,0 +1,11 @@
+id: 34-stock-quote-line
+title: AI Stock Quote Line
+group: D
+capability: [voice, ai-agent, skills]
+language: python
+difficulty: intermediate
+size: M
+status: ready
+primitives: [custom-skill, add_skill, add_skill_directory, agent-server]
+channels: [voice]
+external: []
