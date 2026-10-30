@@ -90,7 +90,9 @@ class ConfirmationAgent(AgentBase):
                 "${global_data.booking.time}, confirmation ${global_data.booking.confirmation}, "
                 "and that the details are on their phone by text. Then say goodbye."
             ) \
-            .set_functions([])
+            .set_functions([]) \
+            .set_valid_steps([]) \
+            .set_end(True)
 
         self.set_dynamic_config_callback(self.preload)
         self.mount(self.sms_router())

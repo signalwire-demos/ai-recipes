@@ -184,3 +184,10 @@ def test_governance_each_step_has_exactly_its_tool(steps):
 def test_governance_model_cannot_navigate_between_steps(steps):
     # no next_step tool: a new caller can't wander into reschedule, only handlers move the call
     assert steps["book"]["valid_steps"] == [] and steps["reschedule"]["valid_steps"] == []
+
+
+def test_governance_confirmed_is_terminal(steps):
+    # Without valid_steps the platform offers next_step on the last step, and the model can
+    # loop on it (seen live in #7, #10, #12, #13). The last step ends the flow.
+    final = steps["confirmed"]
+    assert final["functions"] == [] and final["valid_steps"] == [] and final["end"] is True
