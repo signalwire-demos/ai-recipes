@@ -1,0 +1,5 @@
+{
+  "100101": {"name": "Alex Doe",    "service_zip": "74101", "balance_due": 84.17},
+  "100102": {"name": "Sam Example", "service_zip": "74103", "balance_due": 212.50},
+  "100103": {"name": "Jo Sample",   "service_zip": "74105", "balance_due": 0.00}
+}
