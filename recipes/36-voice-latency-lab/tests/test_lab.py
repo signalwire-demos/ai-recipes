@@ -30,6 +30,31 @@ def test_segments_are_differences_of_reported_fields():
     first = parse_turns(payload())[0][0]
     assert first["turn_detection_ms"] == 400 and first["model_ms"] == 300
     assert first["assembly_ms"] == 80.0 and first["tts_ms"] == 140.0
+    assert first["tools_other_ms"] == 30.0
+
+
+LIVE = sorted((FIXTURES / "live").glob("*.json"))  # sanitized post-prompt payloads from real lab calls
+
+
+def test_live_payloads_mouth_to_ear_matches_platform_acoustic_latency():
+    assert LIVE
+    for path in LIVE:
+        p = json.loads(path.read_text())
+        reported = {e["stamps_us"]["last_word_end"]: e["acoustic_latency"] for e in p["raw_call_log"]
+                    if e.get("role") == "assistant" and e.get("acoustic_latency")
+                    and "last_word_end" in e.get("stamps_us", {})}
+        turns, _ = parse_turns(p)
+        assert len(turns) >= 2
+        for t in turns:
+            if t["anchor"] in reported:
+                assert abs(t["mouth_to_ear_ms"] - reported[t["anchor"]]) <= 1.0
+
+
+def test_live_payloads_segments_add_up_to_mouth_to_ear():
+    for path in LIVE:
+        for t in parse_turns(json.loads(path.read_text()))[0]:
+            parts = sum(t[k] for k in ("turn_detection_ms", "tools_other_ms", "model_ms", "assembly_ms", "tts_ms"))
+            assert abs(parts - t["mouth_to_ear_ms"]) <= 3.0
 
 
 def test_prefers_raw_call_log_over_consolidated_call_log():

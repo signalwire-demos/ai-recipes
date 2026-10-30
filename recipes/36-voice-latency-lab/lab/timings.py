@@ -4,11 +4,17 @@ Source: the post-prompt payload the platform POSTs after each call (the SDK's
 `PostPrompt` TypedDict in signalwire.core.post_prompt_generated). Assistant entries in
 `raw_call_log` (falling back to `call_log`) carry:
 
-  stamps_us.last_word_end, stamps_us.first_audio   microsecond wall-clock stamps
-  eos_to_push_latency    caller's last word -> final speech result   (turn detection)
-  latency                final speech result -> model first token    (model)
-  utterance_latency      ... -> first speakable utterance            (minus latency = assembly)
-  audio_latency          ... -> first audio                          (minus utterance = TTS)
+  stamps_us.*            microsecond wall-clock stamps: last_word_end, status_pushed,
+                         request_detect, first_token, first_utterance, first_audio
+  eos_to_push_latency    last_word_end -> status_pushed      (turn detection)
+  latency                request_detect -> first_token       (model)
+  utterance_latency      request_detect -> first_utterance   (minus latency = assembly)
+  audio_latency          request_detect -> first_audio       (minus utterance = TTS)
+
+The gap status_pushed -> request_detect is the time before the LLM request that produced
+the first audio: tool calls and earlier model passes. It is reported as tools_other_ms, so
+turn detection + tools/other + model + assembly + TTS adds up to mouth-to-ear. (Checked on
+live calls: first_audio - last_word_end equals the platform's acoustic_latency to within 1 ms.)
 
 Method, per signalwire.com/docs/platform/ai/analytics ("Measure responsiveness"):
 mouth-to-ear = first_audio - last_word_end. One value per caller turn: entries that share a
@@ -16,11 +22,16 @@ last_word_end anchor (a filler, a tool call and the final reply) count once, usi
 earliest first_audio. A turn without both stamps is omitted, never estimated.
 """
 
-SEGMENTS = ("mouth_to_ear_ms", "turn_detection_ms", "model_ms", "assembly_ms", "tts_ms")
+SEGMENTS = ("mouth_to_ear_ms", "turn_detection_ms", "tools_other_ms", "model_ms", "assembly_ms", "tts_ms")
 
 
 def _num(value):
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def _us_ms(value):
+    v = _num(value)
+    return v / 1000 if v is not None else None
 
 
 def _diff(a, b):
@@ -38,6 +49,7 @@ def entry_timing(entry: dict) -> dict | None:
         "first_audio": int(first_audio),
         "mouth_to_ear_ms": round((first_audio - last_word) / 1000, 1),
         "turn_detection_ms": _num(entry.get("eos_to_push_latency")),
+        "tools_other_ms": _diff(*(_us_ms(stamps.get(k)) for k in ("request_detect", "status_pushed"))),
         "model_ms": model,
         "assembly_ms": _diff(utter, model),
         "tts_ms": _diff(audio, utter),

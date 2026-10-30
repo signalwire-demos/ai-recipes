@@ -7,6 +7,7 @@ from lab.timings import SEGMENTS, config_of, parse_turns
 LABELS = {
     "mouth_to_ear_ms": "Mouth-to-ear",
     "turn_detection_ms": "Turn detection",
+    "tools_other_ms": "Tools / other",
     "model_ms": "Model",
     "assembly_ms": "Utterance assembly",
     "tts_ms": "Audio (TTS)",

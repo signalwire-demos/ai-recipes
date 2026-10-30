@@ -47,28 +47,35 @@ stateDiagram-v2
 ### Measurement method
 
 Where the numbers come from: the post-prompt payload (`raw_call_log`, falling back to `call_log`).
-Each `assistant` entry carries `stamps_us` (microsecond wall-clock stamps) and the reported
-`eos_to_push_latency`, `latency`, `utterance_latency` and `audio_latency` fields (the SDK types them
-in `signalwire.core.post_prompt_generated`). The REST call log (`client.logs.voice`) only has call
-status and duration, so it isn't used for turn timings. The lab follows the field definitions in
+Each `assistant` entry carries `stamps_us` (microsecond wall-clock stamps: `last_word_end`,
+`status_pushed`, `request_detect`, `first_token`, `first_utterance`, `first_audio`) and the reported
+`eos_to_push_latency`, `latency`, `utterance_latency`, `audio_latency` and `acoustic_latency` fields
+(the SDK types them in `signalwire.core.post_prompt_generated`). The REST call log
+(`client.logs.voice`) only has call status and duration, so it isn't used for turn timings. The lab
+follows the field definitions in
 [Conversation analytics: Measure responsiveness](https://signalwire.com/docs/platform/ai/analytics):
 
 | Column | Computed as |
 |---|---|
-| Mouth-to-ear | `stamps_us.first_audio - stamps_us.last_word_end` (µs → ms) |
-| Turn detection | `eos_to_push_latency` |
-| Model | `latency` (final speech result → first token) |
+| Mouth-to-ear | `first_audio - last_word_end` (µs → ms) |
+| Turn detection | `eos_to_push_latency` (= `status_pushed - last_word_end`) |
+| Tools / other | `request_detect - status_pushed`: tool calls and earlier model passes before the request that produced the first audio |
+| Model | `latency` (= `first_token - request_detect`) |
 | Utterance assembly | `utterance_latency - latency` |
 | Audio (TTS) | `audio_latency - utterance_latency` |
 
-There is one value per caller turn. Entries that share a `last_word_end` anchor (a tool call and
-the reply after it) count once, using the earliest `first_audio`. An entry without both stamps is
+The last five columns add up to mouth-to-ear (to within a few ms). On live lab calls, the computed
+mouth-to-ear matched the platform's own `acoustic_latency` to within 1 ms, and the reported fields
+are milliseconds. `tests/fixtures/live/` keeps two sanitized live payloads that pin this down.
+
+There is one value per caller turn. Entries that share a `last_word_end` anchor (a tool call, the
+reply after it, or a re-prompt after a silence timeout) count once, using the earliest
+`first_audio`. An entry without both stamps (the greeting, a reply the caller barged over) is
 omitted and counted as "untimed", never estimated. Percentiles are nearest-rank (each one is a
 value that was actually measured). Calls are interleaved across configurations so that drift over
 time hits every configuration equally. The caller is synthetic (`say:` TTS over PSTN), so every
 configuration hears identical audio. These are server-side stamps: they don't include the PSTN
-transport to and from the caller's handset. The reported latency fields are read as milliseconds,
-which a live run should confirm.
+transport to and from the caller's handset.
 
 TODO(blocked: align with the public methodology. Nothing yet confirms that this method matches
 how SignalWire measures latency publicly, e.g. which anchor, which percentile, or whether

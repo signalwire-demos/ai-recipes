@@ -19,9 +19,10 @@
    "role": "assistant",
    "stamps_us": {
     "first_audio": 1793000630880000,
-    "first_token": 1793000630640000,
+    "first_token": 1793000630670000,
     "last_word_end": 1793000630000000,
-    "turn_decided": 1793000630380000
+    "request_detect": 1793000630410000,
+    "status_pushed": 1793000630380000
    },
    "timestamp": 1793000630000010,
    "utterance_latency": 330
@@ -68,9 +69,10 @@
    "role": "assistant",
    "stamps_us": {
     "first_audio": 1793000616010000,
-    "first_token": 1793000615750000,
+    "first_token": 1793000615780000,
     "last_word_end": 1793000615000000,
-    "turn_decided": 1793000615420000
+    "request_detect": 1793000615450000,
+    "status_pushed": 1793000615420000
    },
    "timestamp": 1793000615000010,
    "tool_calls": [
@@ -103,9 +105,10 @@
    "role": "assistant",
    "stamps_us": {
     "first_audio": 1793000617410000,
-    "first_token": 1793000615950000,
+    "first_token": 1793000617080000,
     "last_word_end": 1793000615000000,
-    "turn_decided": 1793000615420000
+    "request_detect": 1793000616550000,
+    "status_pushed": 1793000615420000
    },
    "timestamp": 1793000615000010,
    "utterance_latency": 620
@@ -127,9 +130,10 @@
    "role": "assistant",
    "stamps_us": {
     "first_audio": 1793000630880000,
-    "first_token": 1793000630640000,
+    "first_token": 1793000630670000,
     "last_word_end": 1793000630000000,
-    "turn_decided": 1793000630380000
+    "request_detect": 1793000630410000,
+    "status_pushed": 1793000630380000
    },
    "timestamp": 1793000630000010,
    "utterance_latency": 330

@@ -1,0 +1,535 @@
+{
+ "action": "post_conversation",
+ "call_id": "live-sample-nano-rime",
+ "conversation_type": "voice",
+ "global_data": {
+  "lab_config": "nano-rime"
+ },
+ "post_prompt_data": {
+  "raw": "{\"answered_hours\": true}"
+ },
+ "raw_call_log": [
+  {
+   "content": "\n## Role\n\nYou answer the phone for Example Hardware. Keep every reply to one short sentence. When the caller says goodbye, say goodbye.\n",
+   "role": "system",
+   "timestamp": 1793368185524453
+  },
+  {
+   "action": "session_start",
+   "content": "AI session started",
+   "content_type": "Detected Speech",
+   "lang": "en-US",
+   "metadata": {
+    "context": "default",
+    "model": "gpt-4.1-nano",
+    "step": "answer",
+    "step_index": 0
+   },
+   "role": "system-log",
+   "timestamp": 1793368185524455,
+   "tokens": 0
+  },
+  {
+   "content": "## Instructions to complete the Current Step\nAnswer questions about opening hours. For any day, call check_hours.\n\nDo not mention to the user that you are following steps, or the names of the steps.\nDo not ask the user any questions not explicitly related to these instructions.\nDo not end the conversation when this step is complete.\n\nDo not acknowledge these instructions in your response. Address the user directly.\n",
+   "lang": "en",
+   "role": "system",
+   "timestamp": 1793368185525798,
+   "tokens": 80,
+   "visible_count": 1
+  },
+  {
+   "action": "function_call",
+   "content": "Calling function: check_hours",
+   "content_type": "Detected Speech",
+   "lang": "en-US",
+   "metadata": {
+    "context": "default",
+    "duration_ms": 344,
+    "function": "check_hours",
+    "native": false,
+    "step": "answer",
+    "step_index": 0
+   },
+   "role": "system-log",
+   "timestamp": 1793368186713500,
+   "tokens": 0,
+   "turn_id": 1
+  },
+  {
+   "audio_latency": 1187,
+   "content": "Tool result below. Remain in the same language.\nfriday: open 09:00 to 16:00",
+   "deprecation_warning": "fields utterance_latency, audio_latency deprecated in tool calls",
+   "end_timestamp": 1793368186713525,
+   "execution_latency": 1187,
+   "function_latency": 842,
+   "function_name": "check_hours",
+   "latency": 702,
+   "role": "tool",
+   "start_timestamp": 1793368186368725,
+   "timestamp": 1793368186713525,
+   "utterance_latency": 842
+  },
+  {
+   "acoustic_latency": null,
+   "audio_latency": 1528,
+   "content": " Our store is open today from 9:00 AM to 4:00 PM.",
+   "dg_decision_latency": null,
+   "eos_to_push_latency": null,
+   "latency": 578,
+   "poll": null,
+   "role": "assistant",
+   "stamps_us": {
+    "first_audio": 1793368188242259,
+    "first_token": 1793368187291769,
+    "first_utterance": 1793368187389319,
+    "request_detect": 1793368186713620
+   },
+   "timestamp": 1793368191229042,
+   "utterance_latency": 675
+  },
+  {
+   "confidence": 0.999756,
+   "content": "Hi. Are you open on Saturday? ",
+   "content_type": "Detected Speech",
+   "end_timestamp": 1793368195090180,
+   "eot": {
+    "basis": "entity_snap",
+    "confidence": 0.967353,
+    "decided_by": "hold_release",
+    "hold_sources": "acoustic:688>hot_audio:1090"
+   },
+   "role": "user",
+   "speaking_to_final_event": 2420,
+   "start_timestamp": 1793368192670065,
+   "timestamp": 1793368195096376,
+   "timing": {
+    "asr_connection_seq": 0,
+    "asr_stream_injected_us": 500000,
+    "asr_stream_us": 3080000,
+    "commit_latency_ms": 0,
+    "fusion_injected_ms": 200,
+    "fusion_injections": 1,
+    "hold_ms": 1778,
+    "segments": 2,
+    "walkbacks": 2
+   }
+  },
+  {
+   "action": "function_call",
+   "content": "Calling function: check_hours",
+   "content_type": "Detected Speech",
+   "lang": "en-US",
+   "metadata": {
+    "context": "default",
+    "duration_ms": 202,
+    "function": "check_hours",
+    "native": false,
+    "step": "answer",
+    "step_index": 0
+   },
+   "role": "system-log",
+   "timestamp": 1793368196163394,
+   "tokens": 0,
+   "turn_id": 2
+  },
+  {
+   "audio_latency": 1066,
+   "content": "Tool result below. Remain in the same language.\nsaturday: open 10:00 to 14:00",
+   "deprecation_warning": "fields utterance_latency, audio_latency deprecated in tool calls",
+   "end_timestamp": 1793368196163415,
+   "execution_latency": 1066,
+   "function_latency": 863,
+   "function_name": "check_hours",
+   "latency": 688,
+   "role": "tool",
+   "start_timestamp": 1793368195960547,
+   "timestamp": 1793368196163415,
+   "utterance_latency": 863
+  },
+  {
+   "acoustic_latency": 2966,
+   "audio_latency": 1378,
+   "content": " Yes, we are open on Saturday from 10:00 AM to 2:00 PM.",
+   "dg_decision_latency": 10,
+   "eos_to_push_latency": 502,
+   "last_word_end_wall_us": 1793368194576207,
+   "latency": 585,
+   "poll": 1084,
+   "role": "assistant",
+   "speech_start_wall_us": 1793368192654122,
+   "stamps_us": {
+    "first_audio": 1793368197542274,
+    "first_token": 1793368196748768,
+    "first_utterance": 1793368196882173,
+    "last_word_end": 1793368194576207,
+    "request_detect": 1793368196163439,
+    "speech_start": 1793368192654122,
+    "status_pushed": 1793368195078852,
+    "turn_decided": 1793368195068732
+   },
+   "status_pushed_wall_us": 1793368195078852,
+   "timestamp": 1793368201078846,
+   "turn_decided_wall_us": 1793368195068732,
+   "utterance_latency": 718
+  },
+  {
+   "confidence": 1,
+   "content": "And what about Sunday? ",
+   "content_type": "Detected Speech",
+   "end_timestamp": 1793368204090028,
+   "eot": {
+    "basis": "natural",
+    "confidence": 0.868667,
+    "decided_by": "dg_natural",
+    "hold_sources": "none"
+   },
+   "role": "user",
+   "speaking_to_final_event": 1520,
+   "start_timestamp": 1793368202569942,
+   "timestamp": 1793368204099973,
+   "timing": {
+    "asr_connection_seq": 0,
+    "asr_stream_injected_us": 800000,
+    "asr_stream_us": 5080000,
+    "commit_latency_ms": 0,
+    "fusion_injected_ms": 0,
+    "fusion_injections": 0,
+    "hold_ms": 0,
+    "segments": 1,
+    "walkbacks": 0
+   }
+  },
+  {
+   "action": "function_call",
+   "content": "Calling function: check_hours",
+   "content_type": "Detected Speech",
+   "lang": "en-US",
+   "metadata": {
+    "context": "default",
+    "duration_ms": 203,
+    "function": "check_hours",
+    "native": false,
+    "step": "answer",
+    "step_index": 0
+   },
+   "role": "system-log",
+   "timestamp": 1793368205059012,
+   "tokens": 0,
+   "turn_id": 3
+  },
+  {
+   "audio_latency": 958,
+   "content": "Tool result below. Remain in the same language.\nsunday: closed",
+   "deprecation_warning": "fields utterance_latency, audio_latency deprecated in tool calls",
+   "end_timestamp": 1793368205059038,
+   "execution_latency": 958,
+   "function_latency": 754,
+   "function_name": "check_hours",
+   "latency": 607,
+   "role": "tool",
+   "start_timestamp": 1793368204855021,
+   "timestamp": 1793368205059038,
+   "utterance_latency": 754
+  },
+  {
+   "acoustic_latency": 2578,
+   "audio_latency": 1143,
+   "content": " We are closed on Sunday.",
+   "dg_decision_latency": 10,
+   "eos_to_push_latency": 454,
+   "last_word_end_wall_us": 1793368203623691,
+   "latency": 452,
+   "poll": 980,
+   "role": "assistant",
+   "speech_start_wall_us": 1793368202553506,
+   "stamps_us": {
+    "first_audio": 1793368206202272,
+    "first_token": 1793368205511802,
+    "first_utterance": 1793368205589430,
+    "last_word_end": 1793368203623691,
+    "request_detect": 1793368205059064,
+    "speech_start": 1793368202553506,
+    "status_pushed": 1793368204078521,
+    "turn_decided": 1793368204068446
+   },
+   "status_pushed_wall_us": 1793368204078521,
+   "timestamp": 1793368207895388,
+   "turn_decided_wall_us": 1793368204068446,
+   "utterance_latency": 530
+  },
+  {
+   "confidence": 0.995605,
+   "content": "Great. ",
+   "content_type": "Detected Speech",
+   "end_timestamp": 1793368212950331,
+   "eot": {
+    "basis": "entity_snap",
+    "confidence": 0.007405,
+    "decided_by": "hold_release",
+    "hold_sources": "acoustic:659"
+   },
+   "role": "user",
+   "speaking_to_final_event": 1260,
+   "speaking_to_turn_detection": 477,
+   "start_timestamp": 1793368211689941,
+   "timestamp": 1793368212952528,
+   "timing": {
+    "asr_connection_seq": 0,
+    "asr_stream_injected_us": 1300000,
+    "asr_stream_us": 7000000,
+    "commit_latency_ms": 0,
+    "fusion_injected_ms": 200,
+    "fusion_injections": 1,
+    "hold_ms": 659,
+    "segments": 1,
+    "walkbacks": 0
+   },
+   "turn_detection_to_final_event": 782
+  },
+  {
+   "acoustic_latency": null,
+   "audio_latency": 0,
+   "content": " Thank you for calling. Goodbye.",
+   "dg_decision_latency": null,
+   "eos_to_push_latency": null,
+   "interrupted": true,
+   "latency": 0,
+   "poll": null,
+   "role": "assistant",
+   "speech_start_wall_us": 1793368213212451,
+   "stamps_us": {
+    "first_token": 1793368213401529,
+    "first_utterance": 1793368213466281,
+    "request_detect": 1793368212952914,
+    "speech_start": 1793368213212451,
+    "status_pushed": 1793368213253975,
+    "turn_decided": 1793368213243891
+   },
+   "status_pushed_wall_us": 1793368213253975,
+   "timestamp": 1793368213629644,
+   "turn_decided_wall_us": 1793368213243891,
+   "utterance_latency": 0
+  },
+  {
+   "confidence": 0.998047,
+   "content": "Thanks. ",
+   "content_type": "Detected Speech",
+   "end_timestamp": 1793368213629673,
+   "eot": {
+    "basis": "natural",
+    "confidence": 0.007405,
+    "decided_by": "dg_natural",
+    "hold_sources": "none"
+   },
+   "role": "user",
+   "speaking_to_final_event": 339,
+   "start_timestamp": 1793368213289937,
+   "timestamp": 1793368213629693,
+   "timing": {
+    "asr_connection_seq": 0,
+    "asr_stream_injected_us": 1600000,
+    "asr_stream_us": 7540000,
+    "commit_latency_ms": 0,
+    "fusion_injected_ms": 0,
+    "fusion_injections": 0,
+    "hold_ms": 0,
+    "segments": 1,
+    "walkbacks": 0
+   }
+  },
+  {
+   "acoustic_latency": null,
+   "audio_latency": 0,
+   "content": " You're welcome. Goodbye.",
+   "dg_decision_latency": null,
+   "eos_to_push_latency": null,
+   "interrupted": true,
+   "last_word_end_wall_us": 1793368213739634,
+   "latency": 0,
+   "poll": null,
+   "role": "assistant",
+   "speech_start_wall_us": 1793368213270390,
+   "stamps_us": {
+    "first_token": 1793368214093962,
+    "first_utterance": 1793368214167019,
+    "last_word_end": 1793368213739634,
+    "request_detect": 1793368213630123,
+    "speech_start": 1793368213270390,
+    "status_pushed": 1793368214068892,
+    "turn_decided": 1793368214058813
+   },
+   "status_pushed_wall_us": 1793368214068892,
+   "timestamp": 1793368214252294,
+   "turn_decided_wall_us": 1793368214058813,
+   "utterance_latency": 0
+  },
+  {
+   "confidence": 0.999023,
+   "content": "That's all. ",
+   "content_type": "Detected Speech",
+   "end_timestamp": 1793368214252322,
+   "eot": {
+    "basis": "natural",
+    "confidence": 0.297187,
+    "decided_by": "dg_natural",
+    "hold_sources": "none"
+   },
+   "role": "user",
+   "speaking_to_final_event": 62,
+   "start_timestamp": 1793368214189944,
+   "timestamp": 1793368214252343,
+   "timing": {
+    "asr_connection_seq": 0,
+    "asr_stream_injected_us": 1900000,
+    "asr_stream_us": 8600000,
+    "commit_latency_ms": 0,
+    "fusion_injected_ms": 0,
+    "fusion_injections": 0,
+    "hold_ms": 0,
+    "segments": 1,
+    "walkbacks": 0
+   }
+  },
+  {
+   "acoustic_latency": null,
+   "audio_latency": 0,
+   "content": " Thank you for calling. Goodbye.",
+   "dg_decision_latency": null,
+   "eos_to_push_latency": null,
+   "interrupted": true,
+   "last_word_end_wall_us": 1793368214524892,
+   "latency": 0,
+   "poll": null,
+   "role": "assistant",
+   "speech_start_wall_us": 1793368214170891,
+   "stamps_us": {
+    "first_token": 1793368214862948,
+    "first_utterance": 1793368214937543,
+    "last_word_end": 1793368214524892,
+    "request_detect": 1793368214252882,
+    "speech_start": 1793368214170891,
+    "status_pushed": 1793368214991105,
+    "turn_decided": 1793368214720892
+   },
+   "status_pushed_wall_us": 1793368214991105,
+   "timestamp": 1793368215040260,
+   "turn_decided_wall_us": 1793368214720892,
+   "utterance_latency": 0
+  },
+  {
+   "confidence": 0.998535,
+   "content": "Goodbye. ",
+   "content_type": "Detected Speech",
+   "eot": {
+    "basis": "natural",
+    "confidence": 0.051592,
+    "decided_by": "fusion_fire",
+    "hold_sources": "none"
+   },
+   "role": "user",
+   "timestamp": 1793368215040303,
+   "timing": {
+    "asr_connection_seq": 0,
+    "asr_stream_injected_us": 2400000,
+    "asr_stream_us": 10100000,
+    "commit_latency_ms": 0,
+    "fusion_injected_ms": 200,
+    "fusion_injections": 1,
+    "hold_ms": 0,
+    "segments": 1,
+    "walkbacks": 0
+   }
+  },
+  {
+   "acoustic_latency": 1677,
+   "audio_latency": 1161,
+   "content": " Goodbye.",
+   "dg_decision_latency": 270,
+   "eos_to_push_latency": 466,
+   "last_word_end_wall_us": 1793368214524892,
+   "latency": 484,
+   "poll": 49,
+   "role": "assistant",
+   "speech_start_wall_us": 1793368214170891,
+   "stamps_us": {
+    "first_audio": 1793368216202262,
+    "first_token": 1793368215525381,
+    "first_utterance": 1793368215592180,
+    "last_word_end": 1793368214524892,
+    "request_detect": 1793368215040898,
+    "speech_start": 1793368214170891,
+    "status_pushed": 1793368214991105,
+    "turn_decided": 1793368214720892
+   },
+   "status_pushed_wall_us": 1793368214991105,
+   "timestamp": 1793368216930577,
+   "turn_decided_wall_us": 1793368214720892,
+   "utterance_latency": 551
+  },
+  {
+   "action": "attention_timeout",
+   "content": "Attention timeout (5000ms)",
+   "content_type": "Detected Speech",
+   "lang": "en-US",
+   "metadata": {
+    "context": "default",
+    "step": "answer",
+    "step_index": 0,
+    "timeout_ms": 5000
+   },
+   "role": "system-log",
+   "timestamp": 1793368221942221,
+   "tokens": 0,
+   "turn_id": 7
+  },
+  {
+   "acoustic_latency": null,
+   "audio_latency": 1160,
+   "content": " Is there anything else I can assist you with today?",
+   "dg_decision_latency": null,
+   "eos_to_push_latency": null,
+   "last_word_end_wall_us": 1793368214524892,
+   "latency": 457,
+   "poll": null,
+   "role": "assistant",
+   "speech_start_wall_us": 1793368214170891,
+   "stamps_us": {
+    "first_audio": 1793368223102279,
+    "first_token": 1793368222399278,
+    "first_utterance": 1793368222513610,
+    "last_word_end": 1793368214524892,
+    "request_detect": 1793368221941994,
+    "speech_start": 1793368214170891,
+    "status_pushed": 1793368214991105,
+    "turn_decided": 1793368214720892
+   },
+   "status_pushed_wall_us": 1793368214991105,
+   "timestamp": 1793368225292437,
+   "turn_decided_wall_us": 1793368214720892,
+   "utterance_latency": 571
+  },
+  {
+   "content": "The conversation has been ended by the user.\n",
+   "role": "system",
+   "timestamp": 1793368225989384
+  },
+  {
+   "acoustic_latency": null,
+   "audio_latency": 0,
+   "content": "{\"answered_hours\": true}",
+   "dg_decision_latency": null,
+   "eos_to_push_latency": null,
+   "latency": 0,
+   "poll": null,
+   "role": "assistant",
+   "stamps_us": {
+    "first_audio": 1793368223102279,
+    "first_token": 1793368222399278,
+    "first_utterance": 1793368222513610,
+    "request_detect": 1793368221941994
+   },
+   "timestamp": 1793368226932508,
+   "utterance_latency": 0
+  }
+ ]
+}
