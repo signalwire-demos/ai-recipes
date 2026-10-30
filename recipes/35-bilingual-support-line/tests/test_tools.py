@@ -141,3 +141,10 @@ def test_governance_account_tools_absent_until_verified(swml):
     assert "get_balance" not in steps["identify"]["functions"]
     assert sorted(steps["help"]["functions"]) == ["check_outage", "get_balance"]
     assert steps["wrap_up"]["functions"] == []
+
+
+def test_governance_wrap_up_is_terminal(swml):
+    # Without valid_steps the platform offers next_step on the last step, and the model can
+    # loop on it (seen live in #7, #10, #12, #13). The last step ends the flow.
+    final = steps_of(swml)["wrap_up"]
+    assert final["functions"] == [] and final["valid_steps"] == [] and final["end"] is True
