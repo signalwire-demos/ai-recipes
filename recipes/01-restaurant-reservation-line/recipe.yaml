@@ -1,0 +1,11 @@
+id: 01-restaurant-reservation-line
+title: AI Restaurant Reservation Line
+group: A
+capability: [voice, ai-agent]
+language: python
+difficulty: beginner
+size: S
+status: ready
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, dynamic-config]
+channels: [voice]
+external: []
