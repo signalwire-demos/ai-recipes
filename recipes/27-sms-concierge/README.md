@@ -68,10 +68,11 @@ sequenceDiagram
   and calls your tools over it, the same as a voice call.
 - No third-party accounts. The hotel register and amenities are JSON files under `data/`.
 
-TODO(blocked: needs live verification) SMS into the AI Chat service has not been run on a
-live number from the SDK, and `SMS_1` is not on the 10DLC campaign yet (NUMBERS.md). The
-handler, both payload formats and the chat call are covered by tests against a fake
-`AIChatClient`.
+The `/sms` handler to AI Chat path was verified live on 2026-10-30 (real `AIChatClient.chat`
+turns through a tunnel, tools called with `conversation_type: chat`).
+TODO(blocked: needs live verification) A real text on a number has not been tested: binding a
+number's messaging to the webhook isn't verified from the SDK, and `SMS_1` is not on the 10DLC
+campaign yet (NUMBERS.md).
 
 ## Setup
 
