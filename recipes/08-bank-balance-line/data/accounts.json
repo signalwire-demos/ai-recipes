@@ -1,0 +1,32 @@
+{
+  "accounts": [
+    {
+      "id": "ACC-0101",
+      "account_number": "40010101",
+      "date_of_birth": "1985-03-14",
+      "name": "Jordan Rivera",
+      "available_balance": 2418.07,
+      "current_balance": 2533.12,
+      "transactions": [
+        {"id": "T-9001", "date": "2026-10-28", "description": "Corner Grocery", "amount": -64.18},
+        {"id": "T-9002", "date": "2026-10-27", "description": "Payroll deposit", "amount": 1850.00},
+        {"id": "T-9003", "date": "2026-10-25", "description": "Streamly subscription", "amount": -15.99},
+        {"id": "T-9004", "date": "2026-10-24", "description": "Fuel Stop 22", "amount": -48.30},
+        {"id": "T-9005", "date": "2026-10-21", "description": "Online electronics", "amount": -399.00}
+      ]
+    },
+    {
+      "id": "ACC-0102",
+      "account_number": "40010102",
+      "date_of_birth": "1992-11-02",
+      "name": "Sam Okafor",
+      "available_balance": 87.45,
+      "current_balance": 87.45,
+      "transactions": [
+        {"id": "T-9101", "date": "2026-10-29", "description": "Coffee House", "amount": -6.75},
+        {"id": "T-9102", "date": "2026-10-26", "description": "Rent transfer", "amount": -1200.00},
+        {"id": "T-9103", "date": "2026-10-15", "description": "Payroll deposit", "amount": 1310.40}
+      ]
+    }
+  ]
+}
