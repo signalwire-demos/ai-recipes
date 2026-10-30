@@ -201,7 +201,20 @@ def test_governance_steps_and_tools(ai):
         ["record_budget", "record_timeline", "record_authority", "record_need"])
     assert steps["qualify"]["valid_steps"] == []   # only a handler leaves qualify
     assert steps["wrap_up"]["functions"] == []
+    assert steps["wrap_up"]["valid_steps"] == []   # no next_step tool on the last step
 
 
 def test_governance_post_prompt_wired(ai):
     assert "/post_prompt" in ai["post_prompt_url"]
+
+
+def test_model_is_pinned(ai):
+    """Regression (live call 605c901d): on the platform default model no record_* tool ran.
+    The recipe pins config.MODEL (gpt-4.1-mini by default) in ai.prompt."""
+    assert ai["prompt"]["model"] == config.MODEL == "gpt-4.1-mini"
+
+
+def test_every_tool_parameter_is_described(ai):
+    for fn in ai["SWAIG"]["functions"]:
+        for name, prop in fn["parameters"]["properties"].items():
+            assert prop.get("description"), f"{fn['function']}.{name} has no description"

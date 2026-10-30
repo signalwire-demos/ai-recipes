@@ -23,6 +23,7 @@ class LeadQualificationAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="lead-qualification", route=config.ROUTE, port=config.PORT, **kwargs)
         self.add_language("English", config.LANGUAGE_CODE, config.VOICE)
+        self.set_prompt_llm_params(model=config.MODEL)
         self.prompt_add_section(
             "Role",
             f"You answer the sales line for {config.BUSINESS_NAME}. Be warm and brief. "
@@ -32,15 +33,18 @@ class LeadQualificationAgent(AgentBase):
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("qualify") \
             .set_text(
-                "Learn four things, in any order, and record each with its tool as soon as you "
-                "hear it: budget (record_budget), timeline (record_timeline), whether the caller "
-                "signs off on the purchase (record_authority), and what they need (record_need)."
+                "Learn four things, in any order: budget (record_budget), timeline (record_timeline), "
+                "whether the caller signs off on the purchase (record_authority), and what they need "
+                "(record_need). Nothing is recorded until its tool runs: the moment the caller gives "
+                "one of these, call its tool in that same turn, before you reply. Never say you "
+                "recorded something unless the tool returned Recorded."
             ) \
             .set_functions(["record_budget", "record_timeline", "record_authority", "record_need"]) \
             .set_valid_steps([])  # only the last record_* handler moves the call
         ctx.add_step("wrap_up") \
             .set_text("Thank the caller, say a specialist will follow up soon, and say goodbye.") \
-            .set_functions([])
+            .set_functions([]) \
+            .set_valid_steps([])  # last step: no next_step tool for the model to loop on
 
         # The platform POSTs the post-prompt payload to on_summary when the call ends.
         self.set_post_prompt("Summarize the call in one sentence.")
@@ -81,7 +85,8 @@ class LeadQualificationAgent(AgentBase):
         name="record_authority",
         description="Record whether the caller makes or signs off on the buying decision.",
         parameters={"type": "object", "properties": {
-            "is_decision_maker": {"type": "boolean"},
+            "is_decision_maker": {"type": "boolean",
+                                  "description": "True if the caller makes or signs off on the decision"},
         }, "required": ["is_decision_maker"]},
     )
     def record_authority(self, args, raw_data):
@@ -95,7 +100,8 @@ class LeadQualificationAgent(AgentBase):
         name="record_need",
         description="Record the main thing the caller needs.",
         parameters={"type": "object", "properties": {
-            "need": {"type": "string", "enum": config.NEEDS},
+            "need": {"type": "string", "enum": config.NEEDS,
+                     "description": "The closest match to what the caller needs"},
         }, "required": ["need"]},
     )
     def record_need(self, args, raw_data):
