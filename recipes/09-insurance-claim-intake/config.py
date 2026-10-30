@@ -32,6 +32,12 @@ if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
 COMPANY_NAME = "Example Mutual"
 VOICE = "rime.spore"                     # any SignalWire TTS voice id
 LANGUAGE_CODE = "en-US"
+MODEL = os.environ.get("CLAIM_MODEL", "gpt-4.1-mini")   # set_prompt_llm_params(model=...)
+
+# What a valid answer looks like. answers.py enforces these in code, not in the prompt.
+POLICY_PREFIX = "POL"                    # policy numbers are POL-#### (spoken "P O L 0 1 0 1")
+POLICY_DIGITS = 4
+MAX_CLAIM_AGE_DAYS = 365                 # an incident date must be in the past year
 
 # Who gets the screened call. Default: the demo pool's HUMAN_LEG role (nobody answers it;
 # put a real phone in ADJUSTER_NUMBER for a live test). Route by claim type in pick_adjuster().

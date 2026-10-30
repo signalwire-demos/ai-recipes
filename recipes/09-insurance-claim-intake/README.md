@@ -5,8 +5,11 @@ A caller reports an accident, and an adjuster hears a briefing and accepts befor
 ## What it does
 
 The agent takes a first notice of loss: policy number, date, location, what happened, and
-whether anyone was hurt (the policy number and the injuries answer are read back to confirm).
-It files a claim record, puts the caller on hold and phones an adjuster. The adjuster hears a
+whether anyone was hurt (the date and the injuries answer are read back to confirm). Code
+checks every answer: a policy number must look like `POL-0101`, the date must be a real date
+in the past year, the location must be a place, and injuries must be a yes or a no. A wrong
+answer is rejected with a re-ask. The caller's phone number comes from the call's caller ID,
+never from a question. It files a claim record, puts the caller on hold and phones an adjuster. The adjuster hears a
 spoken summary of the claim and presses 1 to take the call, which joins the caller and the
 adjuster. If nobody accepts before the hold times out, the agent asks when to call back,
 stores that callback promise on the claim and says goodbye.
@@ -14,7 +17,14 @@ stores that callback promise on the claim and says goodbye.
 ## What it demonstrates
 
 A screened handoff where the human is briefed before the bridge completes, and the model
-never drives the handoff. The `submit` step exposes one tool, `submit_claim`. Its handler
+never drives the handoff. It also shows that a gathered answer is still caller input. The
+gather (`isolated=True`, so a question can't be answered from an earlier one) unlocks one
+`check_*` tool per question, and `answers.py` decides whether the caller's words are a valid
+policy number, date, place or yes/no. gather_submit has no code hook in 3.7.5, so
+`submit_claim` runs the same checks on the whole record before it files anything. If one
+fails, it stores which field failed (`global_data.fix_field`), returns the re-ask, and the
+model passes the caller's next words back as `submit_claim(answer=...)`. Code applies that
+correction to the flagged field only, so the gather never restarts. The `submit` step exposes one tool, `submit_claim`. Its handler
 writes the claim record, then returns `hold(step="connected", timeout_step="callback")` and
 `rpc_dial(to_number, from_number, dest_swml)`. The `dest_swml` is this app's `/brief` route,
 which turns the claim record into the SWML the adjuster's leg runs: speak the briefing, wait
@@ -33,7 +43,7 @@ stateDiagram-v2
     on_hold --> callback: hold timeout (no answer or declined)
     connected --> [*]: join_adjuster handler, join_conference
     callback --> [*]: promise_callback handler, callback stored, hangup
-    note right of intake: tools = [] (gather locks everything)
+    note right of intake: tools = [] plus one check_* tool per question
     note right of submit: tools = [submit_claim], valid_steps = []
     note right of connected: tools = [join_adjuster], valid_steps = []
     note right of callback: tools = [promise_callback], valid_steps = []
@@ -41,7 +51,9 @@ stateDiagram-v2
 
 | Primitive | Where |
 |---|---|
-| `set_gather_info` / `add_gather_question(confirm=True)` | `app.py`, step `intake` |
+| `set_gather_info(isolated=True)` / `add_gather_question(confirm=True, functions=[...])` | `app.py`, step `intake` |
+| Answer checks (policy format, past date, place, yes/no) | `answers.py`; per-question `check_*` tools and `submit_claim` in `app.py` |
+| `set_prompt_llm_params(model=...)` | `app.py`; model name in `config.py` |
 | `set_functions`, `set_valid_steps([])` | `app.py`, every step |
 | `hold(step=, timeout_step=)` + `rpc_dial` | `app.py`, `submit_claim` handler |
 | dest_swml: briefing, `prompt`, `switch`, `execute_rpc ai_unhold`, `join_conference` | `claims.py`, `adjuster_swml()`; served at `/brief` in `app.py` |
@@ -82,8 +94,9 @@ ngrok http 3000                    # in another terminal; put the URL in PUBLIC_
 
 In the SignalWire Dashboard, set the phone number's call handler to
 `https://USER:PASS@<your-tunnel>/` (USER/PASS = SWML_BASIC_AUTH_USER/PASSWORD), then call it.
-Say something like: "I was rear-ended at Main and 3rd on October 28, policy POL-0101, nobody
-was hurt." When the adjuster phone rings you hear the claim summary. Press 1 to be joined to
+Answer one question at a time: policy "P O L zero one zero one", then a date such as
+"October twenty eighth", a place such as "Main Street and Third Avenue", what happened, and
+whether anyone was hurt. When the adjuster phone rings you hear the claim summary. Press 1 to be joined to
 the caller, or let it ring out (or press any other key) to see the callback path.
 
 Without a phone:
@@ -114,6 +127,8 @@ database first.
 ## What to change first
 
 Open `config.py`: edit `pick_adjuster()` to route by claim type (for example, injuries to a
-bodily-injury desk) instead of one `ADJUSTER_NUMBER`, and tune `HOLD_TIMEOUT`. To change the
-claim fields, edit the gather questions in `app.py`, `FIELDS` and `briefing()` in `claims.py`,
-and `data/claim.schema.json` together.
+bodily-injury desk) instead of one `ADJUSTER_NUMBER`, and tune `HOLD_TIMEOUT`. Set
+`POLICY_PREFIX` and `POLICY_DIGITS` to your policy number format and `MAX_CLAIM_AGE_DAYS` to
+how far back a claim can be filed by phone. `MODEL` picks the LLM. To change the
+claim fields, edit the gather questions in `app.py`, `CHECKS` in `answers.py`, `FIELDS` and
+`briefing()` in `claims.py`, and `data/claim.schema.json` together.
