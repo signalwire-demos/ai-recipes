@@ -1,0 +1,11 @@
+id: 19-answering-service
+title: Answering Service
+group: B
+capability: [voice, sms, ai-agent, swml]
+language: python
+difficulty: intermediate
+size: M
+status: proposed
+primitives: [dynamic-config, contexts-steps, set_functions, valid_steps, swml_change_step, connect, send_sms, global_data]
+channels: [voice, sms]
+external: []
