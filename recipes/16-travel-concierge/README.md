@@ -109,7 +109,7 @@ stateDiagram-v2
 | `FunctionResult.say()` for options and the hold readback | `app.py`, `search_flights`, `hold_flight` |
 | `swaig_post_conversation` + a handler gate on the hand-back | `app.py`, `caller_spoke_after`, `return_to_concierge` |
 
-## Live result
+### Live-tested
 
 Live-tested on 2026-10-30, call `f067dcc6-5328-4347-ace6-bc503ae880bb` (also
 `bdd7c5e2-a22a-441a-b76d-f1f7a5095fb4` and `9d0ebc18-d627-495b-a35c-e65282a40326`): a scripted
