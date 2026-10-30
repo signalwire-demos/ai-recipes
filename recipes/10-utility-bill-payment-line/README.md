@@ -8,8 +8,9 @@ The agent asks for the account number and service ZIP code. Once they match, rec
 and the agent reads the balance due. If the caller wants to pay, the agent pauses the recording
 and hands the call to the SWML `pay` verb, which prompts for the card number, expiry, security
 code and ZIP code by keypad. The card goes straight to the payment connector. Here that's a
-mock served by this same app at `/pay`, which approves or declines fixed test cards. Then
-recording resumes, the agent tells the caller whether the payment went through, and says goodbye.
+mock served by this same app at `/pay`, which approves or declines fixed test cards. Then the
+call comes back to the agent, recording resumes, the agent tells the caller whether the payment
+went through, and says goodbye.
 
 ## What it demonstrates
 
@@ -19,10 +20,17 @@ app's logs:
 - `take_payment` has **no parameters**. Its handler reads the amount from
   `global_data.account.balance_due`, which `verify_account` wrote from the billing record.
   Whatever amount the model or caller says is ignored.
-- The handler returns `stop_record_call()` **then** `pay()`, so the recording is paused before
-  the first digit is pressed. The model only ever hears `${pay_result}`.
+- The handler returns `stop_record_call()` **then** a transfer SWML that runs `pay` and transfers
+  back to this agent at `/?pay_ref=<one-time ref>`. So the recording is paused before the first
+  digit is pressed, and the AI isn't listening while the caller types. (`pay` can't run as an
+  in-AI action: the platform rejects it with 409 "Wait for ai to finish".)
+- The model never hears the pay verb's result. `configure()` turns the one-time `pay_ref` back
+  into the account and starts the returning call at `after_payment`, whose one tool,
+  `resume_recording`, restarts the recording and says "went through" only on server-side
+  evidence: the mock connector approved a charge carrying this call's `pay_ref`, or the
+  platform's `status_url` reported `payment-completed` for this call. Anything else is
+  reported as not paid.
 - `take_payment` exists only in the `bill` step, which only the `verify_account` handler opens.
-  `after_payment` has one tool, `resume_recording`, whose handler restarts the recording.
 - The mock connector logs only the transaction id, amount and result. Its `/pay/status`
   callback keeps the event name per call and drops every card field. A test asserts that no
   card data shows up in any log output.
@@ -32,13 +40,15 @@ stateDiagram-v2
     [*] --> verify
     verify --> verify: verify_account(no match), no change
     verify --> bill: verify_account handler, record_call + swml_change_step
-    bill --> after_payment: take_payment handler, stop_record_call + pay + swml_change_step
+    bill --> pay: take_payment handler, stop_record_call + transfer SWML [pay, transfer]
+    pay --> after_payment: transfer back to /?pay_ref=REF, configure() sets initial_step
     bill --> wrap_up: model (caller declines) or take_payment with nothing due
     after_payment --> wrap_up: resume_recording handler, record_call + swml_change_step
     wrap_up --> [*]
     note right of verify: tools = [verify_account], valid_steps = []
     note right of bill: tools = [take_payment] (no params), amount from global_data
-    note right of after_payment: tools = [resume_recording], valid_steps = []
+    note right of pay: SWML pay verb, outside the AI; card goes to the connector only
+    note right of after_payment: tools = [resume_recording], valid_steps = [], outcome from connector
     note right of wrap_up: tools = []
 ```
 
@@ -46,8 +56,9 @@ stateDiagram-v2
 |---|---|
 | `set_functions`, `set_valid_steps` | `app.py`, steps `verify`, `bill`, `after_payment`, `wrap_up` |
 | `record_call` + `update_global_data` + `swml_change_step` | `app.py`, `verify_account` handler |
-| `stop_record_call` then `pay` (amount from `global_data`) | `app.py`, `take_payment` handler |
-| `record_call` (resume) | `app.py`, `resume_recording` handler |
+| `stop_record_call`, then `execute_swml([pay, transfer], transfer=True)` (amount from `global_data`) | `app.py`, `take_payment` handler |
+| `set_dynamic_config_callback` + `set_initial_step("after_payment")` | `app.py`, `configure()` |
+| `record_call` (resume), outcome from connector approvals | `app.py`, `resume_recording` handler |
 | Payment connector + `status_url` | `connector.py`, `POST /pay` and `POST /pay/status` |
 
 ## Prerequisites
@@ -57,7 +68,6 @@ stateDiagram-v2
 - A public URL for your machine (ngrok or similar). The platform calls both the agent and the
   `/pay` connector through it.
 - No third-party accounts and no processor account. The connector is a mock.
-- TODO(blocked: unknown whether `pay` must be enabled per Space; confirm before the first live call)
 
 ## Setup
 
@@ -87,7 +97,7 @@ test card on the keypad, pressing `#` after each entry (any future expiry such a
 
 | Card number (keypad) | Mock result |
 |---|---|
-| `4242 4242 4242 4242` | Approved (`pay_result` = `success`) |
+| `4242 4242 4242 4242` | Approved (status `payment-completed`; the agent says it went through) |
 | `4000 0000 0000 0002` | Declined: `card_declined` |
 | `4000 0000 0000 9995` | Declined: `insufficient_funds` |
 | anything else | Declined: `card_not_supported` (the mock never approves a real card) |
@@ -105,6 +115,34 @@ swaig-test app.py --custom-data '{"global_data": {"account": {"id": "100101", "b
     --exec take_payment --amount 1.00     # the 1.00 is ignored: charge_amount is 84.17
 ```
 
+### Live test
+
+Live-tested on 2026-10-30 with signalwire-sdk 3.7.5. A scripted caller (`TEST_CALLER` to `TEST_INBOUND`) sent the
+test card by DTMF (`send_digits`). Debug webhooks were off, and the only test logging was the
+key names of `/pay` traffic.
+
+- `51fc4c83-c36b-4b03-a19b-b879c1a6c457` (the original code): `verify_account` started recording and
+  `take_payment` stopped it. Then the `pay` action failed within a second (`pay_result: failed`) and
+  `/pay` was never called. The `ai_response` reached the model as "The payment result is ." (empty),
+  and the model told the caller the payment **was successful**. Because pay had already ended, the
+  keypad digits then went to the AI as speech. Both are fixed: no `${pay_result}` reaches the model,
+  and pay runs outside the AI.
+- `b3784c89-d347-487c-8c71-2e3a372b4ecf` (diagnosis): the `/pay/status` callback showed why pay failed:
+  `calling.error` 409 "Wait for ai to finish". A `pay` returned as an in-AI SWML action (what
+  `FunctionResult.pay` emits) can't run while the AI is active.
+- `c3722a5e-32bc-4652-ac7f-77edf2bb6199` (after the fix, 123 s): the call left the AI, `pay` prompted, and
+  the card went to `POST /pay` **with the Authorization header from the userinfo in
+  `payment_connector_url`**, so the basic-auth credentials embedded in the URL work. The mock
+  approved it, and `/pay/status` reported `payment-card-number` ... `payment-processing` ...
+  `payment-completed`. The call came back at `/?pay_ref=...`, started at `after_payment`, and
+  `resume_recording` restarted the recording. On the Space there is one recording before pay
+  (8 s) and one after (26 s), and nothing in between. Card digits appear nowhere in the app log or
+  in either AI session's transcript. The agent said the payment did *not* go through: the
+  connector had keyed the approval on `pay_ref` and only parsed the `{"name","value"}` form of
+  `parameters`, but the platform sends `[{"account_id": ...}, {"pay_ref": ...}]`. That's fixed with
+  a test using the observed wire shape, and the `payment-completed` status event now also counts
+  as evidence. The fix has not been re-run live: all three calls for this recipe are used.
+
 ## Deploy
 
 ```bash
@@ -112,8 +150,14 @@ docker compose up --build          # reads .env, serves on :3000
 ```
 
 Put it behind any HTTPS host and point the number at `https://USER:PASS@<host>/`.
-Serverless: the agent itself works on Lambda, but the `/pay/status` results are kept in memory
-per process. Move them to a shared store first, or drop `resume_recording`'s status lookup.
+Serverless: the agent itself works on Lambda, but the `/pay/status` events, the connector's
+approvals and the pending `pay_ref`s are kept in memory per process. Move them to a shared
+store first.
+
+The platform's post-prompt payload (`/post_prompt`, sent at hangup even with no post_prompt
+configured) carries `SWMLVars.pay_payment_results`. That includes the masked card number, the
+expiry date and the postal code. This recipe doesn't log it. If you add an `on_summary`, drop
+that field before you store anything.
 
 ## What to change first
 

@@ -4,11 +4,14 @@ Governance point: card digits never reach the model, the recording, or this app'
 take_payment takes no arguments. Its handler reads the amount from global_data (written
 by verify_account from the billing record), stops the recording, then hands the caller
 to the SWML pay verb, which collects the card by DTMF and posts it straight to the
-payment connector. The model only ever hears ${pay_result}. A follow-up step, whose only
-tool is resume_recording, turns the recording back on before the call goes on.
+payment connector. pay can't run inside a live AI session, so the call leaves the agent
+for pay and transfers back to it at after_payment. The model never hears the pay verb's
+result: resume_recording, the only tool there, turns the recording back on and says
+"went through" only if the connector approved this call's charge.
 """
 import json
-from urllib.parse import urlsplit, urlunsplit
+import secrets
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from signalwire import AgentBase, FunctionResult
 
@@ -25,6 +28,9 @@ class BillPaymentAgent(AgentBase):
         super().__init__(name="bill-payment", route=config.ROUTE, port=config.PORT, **kwargs)
         self.accounts = load_accounts()
         self.pay_status: dict[str, dict] = {}  # call_id -> last pay status event (no card fields)
+        self.pay_approvals: dict[str, str] = {}  # pay_ref -> charge_id, written only by the connector
+        self.pending_pay: dict[str, dict] = {}   # pay_ref -> {"account": ...} while the caller is in pay
+        self.set_dynamic_config_callback(self.configure)
 
         self.add_language("English", config.LANGUAGE_CODE, config.VOICE)
         self.prompt_add_section(
@@ -52,19 +58,37 @@ class BillPaymentAgent(AgentBase):
             .set_valid_steps([])
         ctx.add_step("wrap_up") \
             .set_text("Ask if there is anything else, then say goodbye.") \
-            .set_functions([])
+            .set_functions([]) \
+            .set_valid_steps([])  # last step: no next_step tool (recipe 12 looped on next_step("next") live)
 
     def _register_routes(self, router):
-        router.include_router(make_router(self.get_basic_auth_credentials(), self.pay_status))
+        router.include_router(make_router(self.get_basic_auth_credentials(), self.pay_status, self.pay_approvals))
         super()._register_routes(router)
 
-    def connector_urls(self) -> tuple[str, str]:
-        """The mock connector sits behind this app's basic auth, carried in the URL."""
+    def _authed_base(self) -> str:
         user, password = self.get_basic_auth_credentials()
         base = urlsplit(config.PUBLIC_URL)
-        authed = urlunsplit(base._replace(netloc=f"{user}:{password}@{base.netloc}"))
+        return urlunsplit(base._replace(netloc=f"{quote(user, safe='')}:{quote(password, safe='')}@{base.netloc}"))
+
+    def connector_urls(self) -> tuple[str, str]:
+        """The mock connector sits behind this app's basic auth, carried in the URL. The platform
+        sends that userinfo as an Authorization header (verified live on /pay/status)."""
+        authed = self._authed_base()
         return (config.PAY_CONNECTOR_URL or f"{authed}/pay",
                 config.PAY_STATUS_URL or f"{authed}/pay/status")
+
+    def resume_url(self, pay_ref: str) -> str:
+        """Where the call comes back to after pay: this agent, told which payment it is."""
+        return f"{self._authed_base()}{config.ROUTE.rstrip('/')}/?pay_ref={quote(pay_ref)}"
+
+    def configure(self, query_params, body_params, headers, agent):
+        """A call coming back from pay: restore the account and start at after_payment.
+        Unknown or reused refs start a normal call at verify."""
+        pending = self.pending_pay.pop(str(query_params.get("pay_ref", "")), None)
+        if pending:
+            agent.set_global_data({"account": pending["account"],
+                                   "payment": {"ref": query_params["pay_ref"]}})
+            agent.define_contexts().get_context("default").set_initial_step("after_payment")
 
     @AgentBase.tool(
         name="verify_account",
@@ -102,26 +126,30 @@ class BillPaymentAgent(AgentBase):
         if amount <= 0:
             return FunctionResult("There is nothing to pay on this account.").swml_change_step("wrap_up")
         connector_url, status_url = self.connector_urls()
+        pay_ref = secrets.token_hex(8)  # links this call's charge at the connector to resume_recording
+        self.pending_pay[pay_ref] = {"account": account}
+        pay_verb = next(v for v in FunctionResult().pay(
+            payment_connector_url=connector_url,
+            status_url=status_url,
+            charge_amount=f"{amount:.2f}",  # from global_data, never from model arguments
+            description=f"{config.UTILITY_NAME} bill",
+            security_code=config.PAY_SECURITY_CODE,
+            postal_code=config.PAY_POSTAL_CODE,
+            max_attempts=config.PAY_MAX_ATTEMPTS,
+            valid_card_types=config.PAY_CARD_TYPES,
+            parameters=[{"name": "account_id", "value": account.get("id", "")},
+                        {"name": "pay_ref", "value": pay_ref}],
+        ).to_dict()["action"][0]["SWML"]["sections"]["main"] if "pay" in v)
+        # pay can't run inside a live AI session: as a plain SWML action (what FunctionResult.pay
+        # emits) the platform rejected it with calling.error 409 "Wait for ai to finish" (live call
+        # 51fc4c83). So the call leaves the AI (transfer), runs pay, and transfers back to this
+        # agent at ?pay_ref=..., where configure() restores the account and opens after_payment.
+        # The pay verb's ${pay_result} never reaches the model: resume_recording decides.
         return (
             FunctionResult("I'll take your card on the keypad now. The recording is paused.")
             .stop_record_call(control_id=config.RECORDING_CONTROL_ID)
-            .pay(
-                payment_connector_url=connector_url,
-                status_url=status_url,
-                charge_amount=f"{amount:.2f}",  # from global_data, never from model arguments
-                description=f"{config.UTILITY_NAME} bill",
-                security_code=config.PAY_SECURITY_CODE,
-                postal_code=config.PAY_POSTAL_CODE,
-                max_attempts=config.PAY_MAX_ATTEMPTS,
-                valid_card_types=config.PAY_CARD_TYPES,
-                parameters=[{"name": "account_id", "value": account.get("id", "")}],
-                ai_response=(
-                    "The payment result is ${pay_result}. Call resume_recording now. Then tell the "
-                    "caller: success means the payment went through; anything else means no "
-                    "money was taken and they can try again later."
-                ),
-            )
-            .swml_change_step("after_payment")
+            .execute_swml({"version": "1.0.0", "sections": {"main": [
+                pay_verb, {"transfer": {"dest": self.resume_url(pay_ref)}}]}}, transfer=True)
         )
 
     @AgentBase.tool(
@@ -130,11 +158,25 @@ class BillPaymentAgent(AgentBase):
         parameters={"type": "object", "properties": {}},
     )
     def resume_recording(self, args, raw_data):
-        event = self.pay_status.get(str((raw_data or {}).get("call_id", "")), {})
+        """Fail closed. "Went through" needs server-side evidence: the mock connector approved
+        this call's pay_ref, or the platform's pay status_url said payment-completed for this
+        call (the signal that also works with a real processor's connector)."""
+        raw_data = raw_data or {}
+        event = self.pay_status.get(str(raw_data.get("call_id", "")), {})
+        ref = str(((raw_data.get("global_data") or {}).get("payment") or {}).get("ref", ""))
+        charge_id = self.pay_approvals.get(ref) if ref else None
+        paid = bool(charge_id) or event.get("for") == "payment-completed"
+        if paid:
+            confirmation = f", confirmation {charge_id}" if charge_id else ""
+            say = f"Recording resumed. The payment went through{confirmation}. Tell the caller."
+        else:
+            say = ("Recording resumed. The payment did NOT go through and no money was taken. "
+                   "Tell the caller they can try again later. Do not say it succeeded.")
         return (
-            FunctionResult("Recording resumed. Now tell the caller the payment result.")
+            FunctionResult(say)
             .record_call(control_id=config.RECORDING_CONTROL_ID, stereo=True, format="mp3")
-            .update_global_data({"payment": {"status_event": event.get("for", "unknown")}})
+            .update_global_data({"payment": {"ref": ref, "approved": paid,
+                                             "status_event": event.get("for", "unknown")}})
             .swml_change_step("wrap_up")
         )
 
