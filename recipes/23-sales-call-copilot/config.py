@@ -81,9 +81,11 @@ LANGUAGE_CODE = "en-US"
 SIDECAR_MODEL = os.environ.get("SIDECAR_MODEL", "")      # blank = platform default
 CUSTOMER_ROLE = "remote-caller"   # the leg that ends a turn: the inbound caller is the customer
 
-# Sidecar callback event types that carry transcript text. The per-type field list is
-# not verified yet, so the consumer looks for a string "text" field on these types only.
-TRANSCRIPT_EVENT_TYPES = {"transcription", "transcript", "utterance"}
+# Sidecar callback events that carry the customer's words. Seen live (call 6d04cc81, 2026-10-30):
+# each "turn" event has customer_text, agent_text and transcript_delta. Other types seen: start,
+# request, tool_call, tool_result, skip, stop, final.
+TRANSCRIPT_EVENT_TYPES = {"turn"}
+TRANSCRIPT_FIELD = "customer_text"     # agent_text is the rep: never classified
 
 # The rep's phone. The inbound call is bridged here with `connect`.
 # Demo pool: HUMAN_LEG_2 (nobody answers it; put a real phone in REP_NUMBER for a live test).

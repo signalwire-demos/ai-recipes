@@ -21,8 +21,11 @@ customer's words to a plain-code classifier (`classify()` in `app.py`). The clas
 of regexes from `config.PLAYBOOK`, and it runs first: the model never decides the category. The
 talk tracks go only to the rep's page. They aren't in the prompt, they aren't in the tool
 description, and the tool's response doesn't contain them (tests assert all three). Sidecar
-callbacks (`insight`, `final`) arrive at `POST /events`, are unwrapped from `sidecar_event`, and
-become cards on the same Server-Sent Events stream.
+callbacks arrive at `POST /events` and are unwrapped from `sidecar_event`. Every `turn` event
+carries the customer's words (`customer_text`), and `on_event()` runs the same classifier on them
+in code. An objection the model doesn't flag still reaches the rep, and a card already pushed by
+the tool isn't repeated (`config.REPEAT_AFTER_S`). `insight` and `final` events become cards on the
+same Server-Sent Events stream. The rep's words (`agent_text`) are never classified.
 
 ```mermaid
 stateDiagram-v2
@@ -44,16 +47,33 @@ stateDiagram-v2
 | `SWMLService` hosting `ai_sidecar` (schema-validated by `add_verb`) | `app.py`, `SalesCopilot.__init__`, `sidecar_config()` |
 | `SWAIG.functions` = exactly `[flag_objection]` | `app.py`, `sidecar_config()` |
 | Deterministic objection classifier | `app.py`, `classify()`; rules in `config.PLAYBOOK` |
-| Sidecar callback consumer (`sidecar_event.type`) | `app.py`, `on_event()` and `POST /events` |
+| Sidecar callback consumer (`sidecar_event.type`, `turn.customer_text`) | `app.py`, `on_event()` and `POST /events` |
 | Rep page over SSE | `app.py`, `GET /rep/stream`; UI in `web/` |
+
+### Live-tested
+
+Live-tested on 2026-10-30. `ai_sidecar` is enabled on the demo Space and works end to end. The
+customer leg was a scripted caller to `TEST_INBOUND`. `REP_NUMBER` was our `OUTBOUND_1`, answered by
+a scripted rep, so the call bridged and the sidecar heard both legs (`turn` events had both
+`customer_text` and `agent_text`).
+
+- Call `6d04cc81-36f8-4088-bb16-7262f747659b`: `flag_objection` produced pricing and authority
+  cards plus a `final` card (`transcribe_close`). The model skipped "We already use Globex" (it
+  called `sidecar_skip`, "customer is providing competitor information"), so no competitor card
+  appeared. At that point `on_event()` only classified events with a `text` field, which no live
+  event has.
+- Call `4bf6474f-7633-4d10-91e7-d400d5ccfb2a`, after the fix: the pricing, competitor (Globex) and
+  authority cards plus `final` all reached `/rep/stream`. The classifier on the `turn` events
+  pushed each one first, and the model's later `flag_objection` calls were de-duplicated.
+
+Event types seen live: `start`, `turn`, `request`, `tool_call`, `tool_result`, `skip`, `stop`,
+`final`. No `insight` arrived (the model only skipped or flagged), so the insight card wasn't
+tested live.
 
 Not available yet, so this recipe doesn't attempt them:
 
-- The `ai_sidecar` verb is documented (SWML reference, SDK schema since 3.4.0), but no source
-  says whether it's generally available. Ask SignalWire support whether it's enabled on your Space.
-- `TODO(blocked: per-type ai_sidecar callback fields are at docs apis/rest/webhooks/ai-sidecar-callback, not verified)`.
-  `on_event()` handles `insight` and `final` (documented fields). It classifies a transcript event
-  only when the event has a string `text` field. Otherwise the `flag_objection` tool path does the work.
+- The `ai_sidecar` verb works on the demo Space (live calls above), but no source says whether
+  it's generally available. Ask SignalWire support whether it's enabled on your Space.
 - `TODO(blocked: no documented way to whisper audio to the human rep)`. `rpc_ai_message` reaches
   only an AI agent, which is why the cards go to a web page.
 - `TODO(blocked: no documented REST/RELAY command to start ai_sidecar on a call already in progress)`.
