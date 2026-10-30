@@ -1,0 +1,8 @@
+[
+  {"id": "S-0101", "day": "Monday",    "time": "09:00", "provider": "Dr. Rivera", "visit": "checkup"},
+  {"id": "S-0102", "day": "Monday",    "time": "14:30", "provider": "Dr. Rivera", "visit": "follow-up"},
+  {"id": "S-0103", "day": "Tuesday",   "time": "10:15", "provider": "Dr. Chen",   "visit": "checkup"},
+  {"id": "S-0104", "day": "Wednesday", "time": "11:00", "provider": "Dr. Chen",   "visit": "follow-up"},
+  {"id": "S-0105", "day": "Thursday",  "time": "15:45", "provider": "Dr. Rivera", "visit": "checkup"},
+  {"id": "S-0106", "day": "Friday",    "time": "08:30", "provider": "Dr. Chen",   "visit": "checkup"}
+]
