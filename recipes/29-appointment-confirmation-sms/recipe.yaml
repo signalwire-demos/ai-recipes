@@ -1,0 +1,11 @@
+id: 29-appointment-confirmation-sms
+title: Appointment Confirmation SMS
+group: C
+capability: [voice, sms, ai-agent, rest, outbound]
+language: python
+difficulty: intermediate
+size: M
+status: proposed
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, send_sms, dynamic-config, rest-dial, laml-webhooks]
+channels: [voice, sms]
+external: []
