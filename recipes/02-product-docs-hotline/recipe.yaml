@@ -1,0 +1,11 @@
+id: 02-product-docs-hotline
+title: AI Product Docs Hotline
+group: A
+capability: [voice, ai-agent, skills, search]
+language: python
+difficulty: beginner
+size: S
+status: ready
+primitives: [native_vector_search, response_format_callback, sw-search, add_language]
+channels: [voice]
+external: []
