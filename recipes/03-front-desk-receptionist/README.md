@@ -82,6 +82,19 @@ Try: "How much is the gigabit plan?", then "Can I get a refund on invoice INV-10
 no route to billing, so Franklin sends you back to the front desk or to support first).
 `INV-1002` is over the refund limit and `INV-1003` is already refunded.
 
+Live-tested 2026-10-30, inbound call `b9b47966-4813-4c3a-811b-543fe055920b` (146 s, scripted
+caller, stereo recording on the caller leg). The platform's debug log shows `context_change`
+default -> sales -> support -> billing (all `isolated: true`). Each department's replies carry its
+own language tag (`English-Franklin`, `English-Rachael`, `English-Dwight`), and each one called
+only its own tools: `get_plan_price`, then `check_service_status` + `open_ticket` (ticket written
+to `data/tickets.jsonl`), then `get_invoice`. The recording's agent channel changes voice at each
+handoff: median pitch about 230 Hz for Riley (`inworld.Sarah`), 130 to 160 Hz for Franklin
+(`inworld.Mark`), 170 to 195 Hz for Rachael (`inworld.Ashley`, so that voice id loads and
+speaks), and about 85 Hz for Dwight (`inworld.Blake`). No calling errors were logged. The call
+also found a bug, now fixed: speech recognition handed over "Inv1001", which the old exact
+`.upper()` lookup couldn't find. `invoice_key()` now normalizes it to `INV-1001`. The refund
+after that fix has not been tested live.
+
 Without a phone:
 
 ```bash

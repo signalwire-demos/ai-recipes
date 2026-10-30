@@ -69,6 +69,17 @@ def test_get_invoice(agent):
     assert "can't find" in text(agent.get_invoice({"invoice_id": "INV-9"}, {}))
 
 
+@pytest.mark.parametrize("spoken", ["Inv1001", "inv 1001", "INV-1001", "1001", "I.N.V. 1001"])
+def test_invoice_number_as_asr_hears_it(agent, spoken):
+    # Regression: live call b9b47966 sent get_invoice("Inv1001") and got "can't find".
+    assert "$59.99" in text(agent.get_invoice({"invoice_id": spoken}, {}))
+
+
+def test_refund_accepts_asr_invoice_number(agent):
+    assert "Refunded $59.99" in text(agent.issue_refund({"invoice_id": "Inv1001"}, {"call_id": "c1"}))
+    assert json.loads(config.REFUNDS_FILE.read_text())["invoice_id"] == "INV-1001"
+
+
 def test_refund_uses_record_amount_and_is_idempotent(agent):
     # The model can't pass an amount: the schema has none, and extra args are ignored.
     agent.issue_refund({"invoice_id": "INV-1001", "amount": 5000}, {"call_id": "c2"})
