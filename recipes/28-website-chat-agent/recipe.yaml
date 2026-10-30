@@ -1,0 +1,11 @@
+id: 28-website-chat-agent
+title: AI Website Chat Agent
+group: C
+capability: [voice, chat, ai-agent]
+language: python
+difficulty: intermediate
+size: M
+status: confirm
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, ai-chat-gateway]
+channels: [voice, web]
+external: []
