@@ -21,7 +21,7 @@ which the front desk confirms with a call back. After the call, one audit line p
 Compliance as a state machine rather than a promise. The `consent` step's text carries the
 disclosure, its only tool is `record_consent`, and `valid_steps=[]` gives the model no way
 out. The scheduling tools don't exist in that step. Recording starts in exactly one place: the
-`record_consent` handler, on `granted=true`, before it moves the call to `schedule`. A refusal
+`record_consent` handler, on `answer=yes`, before it moves the call to `schedule`. A refusal
 moves to `schedule_limited`, where `book_slot` isn't defined (and `book_slot` also re-checks
 `global_data.consent` itself). `on_summary` builds the audit record from the `global_data` the
 handlers wrote, not from the transcript or the model's summary.
@@ -29,9 +29,9 @@ handlers wrote, not from the transcript or the model's summary.
 ```mermaid
 stateDiagram-v2
     [*] --> consent
-    consent --> consent: record_consent(not a clear yes/no), no change
-    consent --> schedule: record_consent(true), record_call + swml_change_step
-    consent --> schedule_limited: record_consent(false), swml_change_step, no recording
+    consent --> consent: record_consent(not yes or no), no change
+    consent --> schedule: record_consent(yes), record_call + swml_change_step
+    consent --> schedule_limited: record_consent(no), swml_change_step, no recording
     schedule --> wrap_up: book_slot handler
     schedule_limited --> wrap_up: hold_slot handler
     wrap_up --> [*]: on_summary writes data/audit.jsonl
@@ -88,9 +88,30 @@ Without a phone:
 pytest -q
 swaig-test app.py --list-tools
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
-swaig-test app.py --exec record_consent --granted true
+swaig-test app.py --exec record_consent --answer yes
 swaig-test app.py --exec find_slots --day monday
 ```
+
+### Live test
+
+Live-tested on 2026-10-30, signalwire-sdk 3.7.5, with a scripted caller (`TEST_CALLER` to `TEST_INBOUND`).
+
+- `9921cc47-5e1e-49c5-8f55-4077aa64bb41` (consent yes, 65 s): the disclosure was read word for word.
+  "Yes" made the model call `record_consent`, which returned `record_call` (control id `consented`) and
+  `change_step: schedule`. A recording started one second later (Space recordings list,
+  46 s). `find_slots(Tuesday)` and `book_slot(S-0103)` ran, and the audit line has `consent_granted: true`,
+  `recorded: true`, `booking.status: booked`.
+- `0a692691-88f8-4382-8199-1821fe4bf185` (consent no, before the fix): the model never submitted
+  `granted=false`. It kept re-asking, and once said the call "will be recorded". The gate held: no
+  SWAIG call ran, so nothing was recorded or booked, and the audit line has `consent_granted: null`.
+  But the caller could not reach the hold path. Fix: `record_consent` now takes an explicit
+  `answer: yes|no` enum, and its description says a no must be submitted too.
+- `5527f302-5c34-45e2-9c5c-39f15034a2ae` (consent no, after the fix, 79 s): "No" made the model call
+  `record_consent(answer=no)`, and the call moved to `schedule_limited` with no recording (none on the
+  Space). "Please just book it, confirm it now" got a hold only: `hold_slot(S-0103)` ran and `book_slot`
+  was never called. The audit line has `consent_granted: false`, `recorded: false`, `booking.status: held`.
+  The same call showed `wrap_up` had no `valid_steps`, so the model looped on `next_step("next")`.
+  `wrap_up` now sets `valid_steps=[]`. That fix has a regression test and has not been re-run live.
 
 ## Deploy
 

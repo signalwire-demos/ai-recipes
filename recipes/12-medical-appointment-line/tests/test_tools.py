@@ -46,7 +46,7 @@ DECLINED = {"global_data": {"consent": {"granted": False}}}
 # --- consent gate -----------------------------------------------------------
 
 def test_consent_granted_records_and_moves_to_schedule(agent):
-    acts = actions(agent.record_consent({"granted": True}, {}))
+    acts = actions(agent.record_consent({"answer": "yes"}, {}))
     assert swml_verbs(acts) == ["record_call"]
     assert find(acts, "change_step") == ["schedule"]
     data = find(acts, "set_global_data")[0]
@@ -57,22 +57,41 @@ def test_consent_granted_records_and_moves_to_schedule(agent):
 
 
 def test_consent_granted_starts_recording_before_step_change(agent):
-    acts = actions(agent.record_consent({"granted": True}, {}))
+    acts = actions(agent.record_consent({"answer": "yes"}, {}))
     keys = [next(iter(a)) for a in acts]
     assert keys.index("SWML") < keys.index("change_step")
 
 
 def test_consent_declined_does_not_record(agent):
-    acts = actions(agent.record_consent({"granted": False}, {}))
+    acts = actions(agent.record_consent({"answer": "no"}, {}))
     assert "record_call" not in swml_verbs(acts)
     assert find(acts, "SWML") == []
     assert find(acts, "change_step") == ["schedule_limited"]
     assert find(acts, "set_global_data")[0]["recorded"] is False
 
 
-@pytest.mark.parametrize("value", ["yes", "true", None, 1])
-def test_ambiguous_consent_neither_records_nor_moves(agent, value):
-    assert actions(agent.record_consent({"granted": value}, {})) == []
+@pytest.mark.parametrize("args", [{"answer": "maybe"}, {"answer": "true"}, {"answer": None}, {"answer": 1},
+                                  {"answer": ""}, {}, {"granted": True}])
+def test_ambiguous_consent_neither_records_nor_moves(agent, args):
+    assert actions(agent.record_consent(args, {})) == []
+
+
+def test_consent_no_is_case_insensitive_and_routes_to_limited(agent):
+    acts = actions(agent.record_consent({"answer": " No "}, {}))
+    assert find(acts, "SWML") == []
+    assert find(acts, "change_step") == ["schedule_limited"]
+
+
+def test_record_consent_schema_offers_an_explicit_no(swml):
+    """Regression (live call 0a692691): with a boolean `granted`, the model never submitted a "no";
+    it kept re-asking and told the caller the call would be recorded anyway. The answer is now an
+    explicit yes/no enum, and the tool description says a no must be submitted too."""
+    ai = next(v["ai"] for v in swml["sections"]["main"] if "ai" in v)
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "record_consent")
+    answer = fn["parameters"]["properties"]["answer"]
+    assert answer["enum"] == ["yes", "no"]
+    assert fn["parameters"]["required"] == ["answer"]
+    assert "no" in fn["description"].lower() and "declined" in fn["description"].lower()
 
 
 # --- scheduling -------------------------------------------------------------
@@ -184,3 +203,9 @@ def test_governance_unrecorded_path_cannot_book(swml):
 def test_governance_nothing_records_before_consent(swml):
     verbs = [next(iter(v)) for v in swml["sections"]["main"]]
     assert "record_call" not in verbs
+
+
+def test_governance_wrap_up_has_no_navigation(swml):
+    """Regression (live call 5527f302): wrap_up had no valid_steps, so the model got a next_step
+    tool, called next_step("next") nine times ("next not found"), and the platform flagged a loop."""
+    assert steps_of(swml)["wrap_up"]["valid_steps"] == []
