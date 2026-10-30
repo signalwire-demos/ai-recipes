@@ -1,0 +1,9 @@
+{
+  "out_of_stock": ["onion_rings", "bacon"],
+  "substitutes": {
+    "onion_rings": ["fries"],
+    "milkshake": ["soda"],
+    "chicken_sandwich": ["cheeseburger"],
+    "bacon": ["extra cheese"]
+  }
+}

@@ -1,0 +1,11 @@
+id: 18-drive-thru-order-taker
+title: AI Drive-Thru Order Taker
+group: B
+capability: [voice, ai-agent]
+language: python
+difficulty: intermediate
+size: M
+status: exists
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data]
+channels: [voice]
+external: []
