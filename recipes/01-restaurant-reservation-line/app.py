@@ -101,7 +101,12 @@ class ReservationAgent(AgentBase):
                 "${global_data.booking.time}, confirmation code "
                 "${global_data.booking.ref}. Thank them and say goodbye."
             ) \
-            .set_functions([])  # explicit: zero tools (steps inherit tools otherwise)
+            .set_functions([]) \
+            .set_valid_steps([]) \
+            .set_end(True)
+        # zero tools (steps inherit them otherwise) and no next_step: without valid_steps the
+        # platform offers next_step to "next", which doesn't exist after the last step (seen
+        # live in recipe 07, call 943ed374: next_step("next") twice, then a hangup loop).
 
     @AgentBase.tool(
         name="book_table",

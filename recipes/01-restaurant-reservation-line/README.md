@@ -16,7 +16,8 @@ exactly one tool, `book_table`, and declares `valid_steps=[]`, so the model has 
 `next_step` tool and can't leave the step on its own. The `book_table` handler checks the
 opening hours and the party size in Python, appends the row to the reservation sink, and only
 then calls `swml_change_step("confirmed")`. A rejected request returns no actions, so the call
-stays in `take_booking`. `confirmed` declares `set_functions([])` and reads the booking from
+stays in `take_booking`. `confirmed` declares `set_functions([])`, `valid_steps=[]` and `set_end(True)`, so it has no
+`next_step` either, and reads the booking from
 `global_data`, which the handler wrote. It doesn't use anything the model said.
 
 ```mermaid
@@ -26,14 +27,14 @@ stateDiagram-v2
     take_booking --> confirmed: book_table handler saves the row, swml_change_step
     confirmed --> [*]
     note right of take_booking: tools = [book_table], valid_steps = []
-    note right of confirmed: tools = [], reads global_data.booking
+    note right of confirmed: tools = [], valid_steps = [], end, reads global_data.booking
 ```
 
 | Primitive | Where |
 |---|---|
 | `define_contexts` / `add_step` | `app.py`, `ReservationAgent.__init__` |
 | `set_functions(["book_table"])`, `set_valid_steps([])` | `app.py`, step `take_booking` |
-| `set_functions([])` | `app.py`, step `confirmed` |
+| `set_functions([])`, `set_valid_steps([])`, `set_end(True)` | `app.py`, step `confirmed` |
 | `update_global_data` + `swml_change_step` | `app.py`, `book_table` handler |
 | `${global_data.booking.*}` in step text | `app.py`, step `confirmed` |
 | `set_dynamic_config_callback` (today's date for the model) | `app.py`, `add_today` |
@@ -85,6 +86,16 @@ What to try on the call (with the default hours in `config.py`):
 - "A table for ten on Saturday." Rejected: the limit is 8 (`MAX_PARTY`).
 - "Monday at 7." Rejected: closed on Mondays.
 - "Friday at 10:30 at night." Rejected: the last seating is an hour before close.
+
+Live-tested 2026-10-30, inbound call `05c5722c-7a21-4c2c-9351-06aeeacb0f18` (84 s, scripted
+caller, current code). The caller asked for four on Saturday at 11:30 PM. `book_table` returned
+"On Saturdays we seat from 12:00 until 22:00" with no actions, so the call stayed in
+`take_booking` and the agent asked for another time. At 8 PM the handler wrote `R-6565` to
+`data/runtime/reservations.json`, and the platform logged `take_booking -> confirmed
+(webhook_action)`. The agent read the booking and code back from `global_data` and hung up once.
+An earlier call, `5f144886-e4b7-4afa-ac7c-74c789de4969`, made before `confirmed` declared
+`valid_steps=[]` and `end`, had the same result. The model sometimes reads the details back and
+waits for a yes before it calls `book_table`, so a scripted caller should be ready to say yes.
 
 ## Deploy
 
