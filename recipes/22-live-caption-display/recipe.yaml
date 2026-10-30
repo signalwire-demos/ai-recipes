@@ -1,0 +1,11 @@
+id: 22-live-caption-display
+title: AI Live Caption Display
+group: C
+capability: [voice, swml, transcription]
+language: python
+difficulty: intermediate
+size: M
+status: confirm
+primitives: [swml-service, live_transcribe, live-events-webhook, transcript-consumer, sse, captions-page]
+channels: [voice, web]
+external: []
