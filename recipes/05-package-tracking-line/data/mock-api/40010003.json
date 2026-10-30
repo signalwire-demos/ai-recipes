@@ -1,0 +1,7 @@
+{
+  "tracking_number": "40010003",
+  "status": "delayed with a delivery exception",
+  "detail": "The address label was damaged. The carrier will contact the sender, and a new delivery date is not set yet.",
+  "last_location": "Wichita, Kansas",
+  "last_scan": "Wednesday at 11:05 AM"
+}
