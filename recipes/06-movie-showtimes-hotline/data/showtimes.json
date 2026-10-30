@@ -1,0 +1,23 @@
+{
+  "theater": "Starlight Cinema",
+  "films": [
+    {
+      "title": "The Lighthouse at Gull Point",
+      "rating": "PG",
+      "runtime": 104,
+      "times": "1:00 PM, 4:15 PM and 7:30 PM"
+    },
+    {
+      "title": "Orbit of Nine",
+      "rating": "PG-13",
+      "runtime": 128,
+      "times": "2:30 PM, 6:00 PM and 9:20 PM"
+    },
+    {
+      "title": "Paper Kites",
+      "rating": "G",
+      "runtime": 88,
+      "times": "11:00 AM, 1:30 PM and 3:45 PM"
+    }
+  ]
+}

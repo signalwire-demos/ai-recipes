@@ -1,0 +1,58 @@
+# AI Movie Showtimes Hotline: one SWML file, no server.
+# Paste it into Dashboard > Resources > SWML Scripts, or create it with the REST call in README.md.
+# What to change first: the theater name in the prompt and the feed URL in get_showtimes.
+version: 1.0.0
+sections:
+  main:
+    - answer: {}
+    - ai:
+        languages:
+          - name: English
+            code: en-US
+            voice: rime.spore
+            function_fillers:
+              - "Let me check today's showtimes."
+        prompt:
+          temperature: 0.3
+          text: |
+            You answer the phone for Starlight Cinema, a movie theater. Be friendly and brief.
+
+            Rules:
+            - When the caller asks what's playing, or when a film is showing, call get_showtimes.
+            - Only give titles, ratings, run times and showtimes that get_showtimes returned.
+              Never guess a time, a title or a price. If they ask about something it didn't
+              return (prices, concessions, a film that isn't listed), say you don't have that
+              information on this line.
+            - If the caller names one film, give only that film's times. Read times naturally.
+            - Ask if there's anything else, then say goodbye.
+        SWAIG:
+          functions:
+            - function: get_showtimes
+              description: Get today's films, ratings, run times and showtimes at the theater.
+              parameters:
+                type: object
+                properties: {}
+              data_map:
+                webhooks:
+                  - url: https://raw.githubusercontent.com/signalwire-demos/ai-recipes/main/recipes/06-movie-showtimes-hotline/data/showtimes.json
+                    method: GET
+                    error_keys:
+                      - error
+                    # SignalWire builds one sentence per film. In foreach and output, the
+                    # response's fields are read from the root (${films}), not ${response.films}.
+                    foreach:
+                      input_key: films
+                      output_key: listing
+                      max: 10
+                      append: "${this.title}, rated ${this.rating}, ${this.runtime} minutes, at ${this.times}. "
+                    expressions:
+                      - string: "${listing}"
+                        pattern: "^\\s*$"
+                        output:
+                          response: There are no showtimes listed for today. Tell the caller to check back tomorrow.
+                    output:
+                      response: "Today's showtimes: ${listing}"
+                # Runs when the feed can't be fetched, or returns an "error" key.
+                output:
+                  response: The showtimes aren't available right now. Ask the caller to try again in a few minutes.
+    - hangup: {}

@@ -1,0 +1,6 @@
+# TEST-ONLY. The recipe itself needs nothing installed: it is one SWML file run by SignalWire.
+# The tests use the SWML schema and the DataMap simulator that ship inside signalwire-sdk.
+signalwire-sdk==3.7.5
+PyYAML==6.0.3
+jsonschema==4.25.1
+pytest==9.2.0
