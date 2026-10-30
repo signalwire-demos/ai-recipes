@@ -1,0 +1,11 @@
+id: 25-win-loss-analyzer
+title: AI Competitive Win/Loss Analyzer
+group: C
+capability: [voice, ai-agent, analytics]
+language: python
+difficulty: intermediate
+size: M
+status: ready
+primitives: [contexts-steps, set_functions, valid_steps, post_prompt, on_summary, schema-validation]
+channels: [voice]
+external: []
