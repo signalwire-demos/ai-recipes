@@ -25,16 +25,33 @@ arguments: `search_flights` and `hold_flight` read them from `global_data.trip`,
 can't book a different trip. The model can't hold a flight
 that isn't in the results either. `search_flights` numbers the matching flights, stores them in
 `global_data.options` (`"1"`, `"2"`, ...), and returns only "Option 1: departing ..." lines with
-no flight IDs. `hold_flight` takes an option number, and code maps it to the stored flight
+no flight IDs.
+
+The options are spoken by the platform, not paraphrased by the model. The destination and party
+size are known from the handoff, so `from_handoff` numbers the options before the AI starts and
+sets them as the booking agent's `static_greeting` ("Hi, this is the booking desk. I have 2
+travelers to Lisbon. Option 1: ... Which option would you like?"). If the caller asks again,
+`search_flights` speaks them with `say()`. The step text carries the same lines
+(`${global_data.options_read}`), so the model can match "the one on the 11th" to option 2. On
+earlier live calls (`28cdbb5a-991c-42ea-ab1f-d1d81e59d1b7`) the model was asked to read the
+options itself, never did, and asked for a departure city instead. `hold_flight` takes an option number, and code maps it to the stored flight
 (re-checked against the inventory). Any other number is refused. The booking agent runs on
 `gpt-4.1-mini` (`config.BOOKING_MODEL`). On earlier test calls, the default model read back
 flights that didn't exist.
+
+`hold_flight` speaks the readback and "Is there anything else you need for this booking?" with
+`say()`, then moves to the `done` step, whose only tool is `return_to_concierge`. The booking
+agent sets `swaig_post_conversation`, so each tool call carries the conversation, and
+`return_to_concierge` refuses to hand back after a hold until the log shows the caller has spoken
+since `hold_flight` (`caller_spoke_after()` in `app.py`). On call `28cdbb5a-...` the model called
+`return_to_concierge` one second after the hold, without waiting for the caller.
 
 The way back works the same way. `return_to_concierge` writes a new record with a fresh token:
 the original summary plus the booking result (`ref`, flight, readback), or none if nothing was
 held. Then it transfers to `/concierge?h=<token>`. The concierge's callback (`from_booking`)
 claims it and adds a "Returning caller" prompt section that its own code writes from those
-fields. The concierge greets the caller with the outcome and carries on. Each agent has only
+fields. The concierge's `static_greeting` is "Welcome back. The booking desk held ..., reference ...
+Is there anything else I can help with?", written in code from those fields. Each agent has only
 its own tools. The concierge can't book, and the booking desk can't hand off anywhere else.
 
 Both transfers are `swml_transfer(..., final=True)`: each agent's AI session ends and the other
@@ -69,7 +86,8 @@ stateDiagram-v2
     }
     state "booking /booking" as B {
         [*] --> choose: from_handoff claims ?h=token, rebuilds global_data
-        choose --> done: hold_flight (handler, swml_change_step)
+        choose --> done: hold_flight (handler: say readback, swml_change_step)
+        done --> done: return_to_concierge refused until the caller speaks
         note right of choose: tools = [search_flights, hold_flight, return_to_concierge], valid_steps = []
         note right of done: tools = [return_to_concierge]
     }
@@ -87,6 +105,26 @@ stateDiagram-v2
 | Numbered options in `global_data`, mapped back by code | `app.py`, `search_flights` and `hold_flight` |
 | `set_prompt_llm_params(model=...)` | `app.py`, `BookingDesk.__init__` (`config.BOOKING_MODEL`) |
 | `set_functions` / `set_valid_steps([])` / `swml_change_step` | `app.py`, both agents' steps |
+| `static_greeting` set per call in the dynamic config callback | `app.py`, `from_handoff`, `from_booking` |
+| `FunctionResult.say()` for options and the hold readback | `app.py`, `search_flights`, `hold_flight` |
+| `swaig_post_conversation` + a handler gate on the hand-back | `app.py`, `caller_spoke_after`, `return_to_concierge` |
+
+### Live-tested
+
+Live-tested on 2026-10-30, call `f067dcc6-5328-4347-ace6-bc503ae880bb` (also
+`bdd7c5e2-a22a-441a-b76d-f1f7a5095fb4` and `9d0ebc18-d627-495b-a35c-e65282a40326`): a scripted
+caller asked the concierge to book Lisbon for two in December. The booking desk opened by
+reading both options, the caller picked option 2, `hold_flight` held FL-103 (1180 dollars, written
+to `bookings.jsonl`) and the platform read it back with "anything else?". The caller answered
+"No", and only then did `return_to_concierge` run. The concierge welcomed the caller back with
+the held flight and reference. The live tool-call payload carried `raw_call_log`, and
+`caller_spoke_after` returned `True` on it (`False` on the same log cut at the hold). The refusal
+branch didn't fire live: on all three calls the model waited for the caller on its own.
+
+One platform oddity, still open: when a tool result also carries a `say` action (and on one
+earlier call, a long `search_flights` result), the platform's call log shows the tool result
+content as empty. The tool responses are kept short and the facts the model needs are in the
+step text.
 
 ## Prerequisites
 
