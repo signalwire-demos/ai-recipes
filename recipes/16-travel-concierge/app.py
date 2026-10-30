@@ -125,8 +125,8 @@ class BookingDesk(AgentBase):
         self.set_global_data({"summary": "No handoff on file.", "trip": None})
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("choose") \
-            .set_text("Greet the caller and confirm the trip in the note. Call search_flights and read "
-                      "the options. When they pick one, call hold_flight. If there's no trip on file, "
+            .set_text("Greet the caller and confirm the trip in the note. Call search_flights; it reads "
+                      "the options aloud. When they pick one, call hold_flight. If there's no trip on file, "
                       "or they want to go back, call return_to_concierge.") \
             .set_functions(["search_flights", "hold_flight", "return_to_concierge"]) \
             .set_valid_steps([])
@@ -159,7 +159,10 @@ class BookingDesk(AgentBase):
             return FunctionResult(f"No flights to {trip['destination_name']} have {trip['travelers']} seats.")
         listing = "; ".join(f"{f['id']} departing {spoken(f['depart'])}, ${f['price'] * trip['travelers']} "
                             f"total for {trip['travelers']}" for f in options)
-        return FunctionResult(f"Flights to {trip['destination_name']}: {listing}.")
+        # The platform speaks the inventory verbatim, so the model can't paraphrase or invent flights.
+        return FunctionResult(f"The caller just heard these, word for word: {listing}. These are the only "
+                              "flights. Don't repeat or add any. Ask which one; then call hold_flight.") \
+            .say(f"Flights to {trip['destination_name']}: {listing}.")
 
     @AgentBase.tool(name="hold_flight", description="Hold seats on one of the listed flights.",
                     parameters={"type": "object", "required": ["flight_id"], "properties": {

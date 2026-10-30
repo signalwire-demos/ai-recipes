@@ -22,7 +22,10 @@ Only an opaque, one-time token goes into the transfer URL (`/booking?h=<token>`)
 agent's dynamic config callback (`from_handoff`) claims the record (read once, then deleted)
 and rebuilds `global_data` from it. The booking tools take no destination or party-size
 arguments: `search_flights` and `hold_flight` read them from `global_data.trip`, so the model
-can't book a different trip.
+can't book a different trip. `search_flights` also reads the options aloud with a `say` action,
+so the caller always hears the real inventory from code. The model can still talk about flights
+that don't exist (it did on two test calls), but `hold_flight` only accepts a flight ID from
+the real list, so a made-up flight can't be held.
 
 The way back works the same way. `return_to_concierge` writes a new record with a fresh token:
 the original summary plus the booking result (`ref`, flight, readback), or none if nothing was
@@ -78,6 +81,7 @@ stateDiagram-v2
 | Handler-written handoff record + one-time token | `handoff.py` (`save`, `claim`) |
 | `set_dynamic_config_callback` rebuilds context | `app.py`, `BookingDesk.from_handoff`, `ConciergeDesk.from_booking` |
 | Tools read trip from `global_data`, not args | `app.py`, `search_flights` and `hold_flight` |
+| `say` reads the inventory verbatim | `app.py`, `search_flights` |
 | `set_functions` / `set_valid_steps([])` / `swml_change_step` | `app.py`, both agents' steps |
 
 ## Prerequisites

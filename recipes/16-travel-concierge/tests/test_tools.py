@@ -116,10 +116,13 @@ def test_unknown_or_expired_token_leaves_defaults(booking, monkeypatch):
 
 
 def test_search_flights_uses_handoff_party_size(booking):
-    text = booking.search_flights({}, {"global_data": {"trip": TRIP}}).to_dict()["response"]
-    assert "FL-101" in text and "$1224 total for 2" in text
-    assert "FL-103 departing December 11 at 18:30" in text           # dates as callers say them
-    assert "FL-102" not in text                                  # only 1 seat left
+    result = booking.search_flights({}, {"global_data": {"trip": TRIP}})
+    (spoken,) = find(acts(result), "say")             # the platform reads the inventory, not the model
+    text = result.to_dict()["response"]
+    for said in (spoken, text):
+        assert "FL-101 departing December 4 at 18:30, $1224 total for 2" in said
+        assert "FL-103 departing December 11 at 18:30" in said      # dates as callers say them
+        assert "FL-102" not in said                                 # only 1 seat left
     assert "no trip" in booking.search_flights({}, {"global_data": {}}).to_dict()["response"].lower()
 
 
