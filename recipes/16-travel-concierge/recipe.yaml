@@ -1,0 +1,11 @@
+id: 16-travel-concierge
+title: AI Travel Concierge
+group: B
+capability: [voice, ai-agent, multi-agent]
+language: python
+difficulty: advanced
+size: M
+status: ready
+primitives: [agent-server, swml_transfer, dynamic-config, contexts-steps, set_functions, valid_steps, swml_change_step, global_data]
+channels: [voice]
+external: []

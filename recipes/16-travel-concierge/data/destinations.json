@@ -1,0 +1,29 @@
+{
+  "lisbon": {
+    "name": "Lisbon",
+    "best_months": "April to June, or September and October",
+    "notes": "Hilly and walkable. Tram 28 is crowded by mid-morning; go early.",
+    "flights": [
+      {"id": "FL-101", "depart": "2026-12-04 18:30", "price": 612, "seats": 4},
+      {"id": "FL-102", "depart": "2026-12-05 09:10", "price": 548, "seats": 1},
+      {"id": "FL-103", "depart": "2026-12-11 18:30", "price": 590, "seats": 6}
+    ]
+  },
+  "kyoto": {
+    "name": "Kyoto",
+    "best_months": "late March to early April for blossoms, or November for autumn leaves",
+    "notes": "Fly into Osaka Kansai; the train to Kyoto takes about 75 minutes.",
+    "flights": [
+      {"id": "FL-201", "depart": "2026-11-20 11:45", "price": 1180, "seats": 2},
+      {"id": "FL-202", "depart": "2026-11-27 11:45", "price": 1095, "seats": 0}
+    ]
+  },
+  "reykjavik": {
+    "name": "Reykjavik",
+    "best_months": "June to August for long days, or October to March for the northern lights",
+    "notes": "Weather changes fast. Book the Blue Lagoon ahead.",
+    "flights": [
+      {"id": "FL-301", "depart": "2026-12-01 20:05", "price": 455, "seats": 9}
+    ]
+  }
+}
