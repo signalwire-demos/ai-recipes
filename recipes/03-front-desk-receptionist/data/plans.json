@@ -1,0 +1,5 @@
+{
+  "basic":   {"speed": "100 Mbps", "monthly": 39.99},
+  "plus":    {"speed": "500 Mbps", "monthly": 59.99},
+  "gigabit": {"speed": "1 Gbps",   "monthly": 79.99}
+}

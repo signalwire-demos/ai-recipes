@@ -1,0 +1,11 @@
+id: 03-front-desk-receptionist
+title: AI Front Desk Receptionist
+group: A
+capability: [voice, ai-agent, multi-agent]
+language: python
+difficulty: beginner
+size: S
+status: exists
+primitives: [contexts-steps, isolated-contexts, valid_contexts, valid_steps, set_functions, add_language]
+channels: [voice]
+external: []
