@@ -1,0 +1,11 @@
+id: 17-customer-survey-caller
+title: AI Customer Survey Caller
+group: B
+capability: [voice, ai-agent, outbound, rest, analytics]
+language: python
+difficulty: beginner
+size: S
+status: ready
+primitives: [prefab, global_data, dynamic-config, rest-dial]
+channels: [voice]
+external: []

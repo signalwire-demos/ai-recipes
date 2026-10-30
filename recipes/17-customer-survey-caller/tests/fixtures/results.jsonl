@@ -1,0 +1,12 @@
+{"survey": "Patient Visit Survey", "call_id": "call-a", "customer_id": "P-0101", "question_id": "likely_to_recommend", "answer": 10, "at": "2026-10-30T14:00:00+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-a", "customer_id": "P-0101", "question_id": "best_part", "answer": "staff", "at": "2026-10-30T14:00:10+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-a", "customer_id": "P-0101", "question_id": "issue_resolved", "answer": "yes", "at": "2026-10-30T14:00:20+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-a", "customer_id": "P-0101", "question_id": "comments", "answer": "Very friendly front desk.", "at": "2026-10-30T14:00:30+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-b", "customer_id": "P-0102", "question_id": "likely_to_recommend", "answer": 4, "at": "2026-10-30T14:05:00+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-b", "customer_id": "P-0102", "question_id": "likely_to_recommend", "answer": 6, "at": "2026-10-30T14:05:05+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-b", "customer_id": "P-0102", "question_id": "best_part", "answer": "price", "at": "2026-10-30T14:05:10+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-b", "customer_id": "P-0102", "question_id": "issue_resolved", "answer": "no", "at": "2026-10-30T14:05:20+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-c", "customer_id": "P-0103", "question_id": "likely_to_recommend", "answer": 8, "at": "2026-10-30T14:10:00+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-c", "customer_id": "P-0103", "question_id": "best_part", "answer": "staff", "at": "2026-10-30T14:10:10+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-c", "customer_id": "P-0103", "question_id": "issue_resolved", "answer": "yes", "at": "2026-10-30T14:10:20+00:00"}
+{"survey": "Patient Visit Survey", "call_id": "call-d", "customer_id": "P-0104", "question_id": "likely_to_recommend", "answer": 9, "at": "2026-10-30T14:15:00+00:00"}
