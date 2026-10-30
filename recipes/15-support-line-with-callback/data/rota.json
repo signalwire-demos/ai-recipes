@@ -1,0 +1,8 @@
+{
+  "timezone": "America/Chicago",
+  "shifts": [
+    {"agent": "Dana", "days": ["mon", "tue", "wed", "thu", "fri"], "start": "09:00", "end": "17:00"},
+    {"agent": "Lee",  "days": ["sat"], "start": "10:00", "end": "14:00"}
+  ],
+  "busy": ["Lee"]
+}

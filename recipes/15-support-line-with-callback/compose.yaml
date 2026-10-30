@@ -1,0 +1,27 @@
+services:
+  app:
+    build: .
+    env_file:
+      - path: .env        # cp .env.example .env first; optional so `docker compose config` works on a clean clone
+        required: false
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: "3000"
+    volumes:
+      - runtime:/app/data/runtime   # callbacks.json, shared with the worker
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["python", "callback_worker.py"]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - runtime:/app/data/runtime
+    depends_on: [app]
+    restart: unless-stopped
+
+volumes:
+  runtime:
