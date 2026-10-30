@@ -57,8 +57,24 @@ def text(reply):
 # --- the agent ---------------------------------------------------------------
 
 def test_get_today_handler():
-    reply = CalendarAgent().get_today({}, {}).to_dict()["response"]
+    reply = CalendarAgent().get_today({}, {"call_id": "c1"}).to_dict()["response"]
     assert datetime.now().strftime("%Y-%m-%d") in reply
+
+
+def test_get_today_guard_stops_the_loop():
+    # B13: with the MCP tools unreachable the model called get_today 10 times in a row.
+    agent = CalendarAgent()
+    first = agent.get_today({}, {"call_id": "loop"}).to_dict()
+    assert "action" not in first and "again" not in first["response"]
+    second = agent.get_today({}, {"call_id": "loop"}).to_dict()["response"]
+    assert "don't call get_today again" in second and datetime.now().strftime("%Y-%m-%d") in second
+    for _ in range(2):
+        agent.get_today({}, {"call_id": "loop"})
+    capped = agent.get_today({}, {"call_id": "loop"}).to_dict()
+    assert "calendar is unavailable" in capped["response"]
+    assert capped["action"] == [{"toggle_functions": [{"function": "get_today", "active": False}]}]
+    # Another call has its own count.
+    assert "action" not in agent.get_today({}, {"call_id": "other"}).to_dict()
 
 
 def swaig_test_bin() -> str:
@@ -99,6 +115,54 @@ def test_platform_discovery_with_the_swml_entry(swml, server):
     assert {t["name"] for t in tools} == {"find_free_slots", "find_my_meetings", "book_meeting", "move_meeting"}
     assert next(t for t in tools if t["name"] == "book_meeting")["inputSchema"]["required"] == \
         ["title", "start", "attendee"]
+
+
+# --- default: the reference calendar is served by the agent's own app ---------
+
+def dump_swml(env_overrides):
+    env = {**os.environ, **env_overrides}
+    out = subprocess.run([swaig_test_bin(), str(RECIPE / "app.py"), "--dump-swml", "--raw"],
+                         capture_output=True, text=True, check=True, cwd=RECIPE, env=env).stdout
+    return json.loads(out)
+
+
+def test_default_mcp_url_is_the_agent_public_url():
+    # MCP_URL unset: one tunnel covers both, so the SWML points at PUBLIC_URL + /mcp-calendar.
+    doc = dump_swml({"MCP_URL": "", "PUBLIC_URL": "https://agent.example.com/"})
+    assert swaig_of(doc)["mcp_servers"] == [
+        {"url": "https://agent.example.com/mcp-calendar", "headers": VOICE}
+    ]
+
+
+@pytest.fixture
+def same_app(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "SERVE_REFERENCE_CALENDAR", True)
+    agent = CalendarAgent()
+    agent.calendar_router.calendar.meetings = {m["id"]: dict(m) for m in SEED}
+    return TestClient(agent.get_app())
+
+
+def test_same_app_serves_mcp_at_the_path(same_app):
+    def post(body, headers=VOICE):
+        return same_app.post("/mcp-calendar", json=body, headers=headers)
+    init = post({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}).json()
+    assert init["result"]["serverInfo"]["name"] == "reference-calendar"
+    tools = post({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).json()["result"]["tools"]
+    assert {t["name"] for t in tools} == {"find_free_slots", "find_my_meetings", "book_meeting", "move_meeting"}
+    booked = post({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                   "params": {"name": "book_meeting",
+                              "arguments": {"title": "Whitening", "start": f"{DAY} 14:00", "attendee": "Priya Shah"}}})
+    assert text(booked.json()).startswith("Booked M-1003")
+    # Token scoping still holds on the mounted route.
+    assert post({"jsonrpc": "2.0", "id": 4, "method": "tools/list"}, headers={}).status_code == 401
+    refused = post({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                    "params": {"name": "cancel_meeting", "arguments": {"meeting_id": "M-1001"}}}).json()
+    assert refused["error"]["code"] == -32602
+
+
+def test_same_app_still_serves_swml_behind_basic_auth(same_app):
+    assert same_app.post("/").status_code == 401
 
 
 # --- reference server: book and move round trip -----------------------------
