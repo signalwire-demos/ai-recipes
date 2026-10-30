@@ -135,6 +135,17 @@ def test_laml_form_payload_replies_with_cxml(client, fake):
     assert fake.calls[0]["id"] == "sms.15550142"
 
 
+@pytest.mark.parametrize("sender, to", [("+15550100", "+15550100"), ("+15550188", "+15550199")])
+def test_texts_from_our_own_number_get_no_reply(client, fake, monkeypatch, sender, to):
+    # Live in recipe 29: a number texting itself looped, each reply arriving as a new inbound text.
+    monkeypatch.setattr(config, "SMS_NUMBER", "+15550188")
+    r = client.post(config.SMS_ROUTE, data={"From": sender, "To": to, "Body": "hi"})
+    assert r.status_code == 200 and "<Message>" not in r.text
+    r = client.post(config.SMS_ROUTE, json={"message": {"from": sender, "to": to, "body": "hi"}})
+    assert r.json()["sections"]["main"] == []
+    assert fake.calls == []
+
+
 def test_empty_text_is_not_sent_to_the_agent(client, fake):
     r = client.post(config.SMS_ROUTE, json={"message": {"from": "+15550142", "body": ""}})
     assert "as text" in r.text and fake.calls == []

@@ -9,8 +9,8 @@ Two inbound payloads are accepted at /sms:
 - JSON {"message": {"from", "to", "body", ...}} from a SWML Webhook resource used for
   messaging (the route in the AI chat docs). The reply is messaging SWML {"reply": ...}.
 - A form-encoded laml_webhooks POST (From, To, Body, MessageSid). The reply is cXML <Message>.
-TODO(blocked: needs live verification) SMS into the AI Chat service is untested from the SDK
-on a live number, and SMS_1 is not on the 10DLC campaign yet. See the README.
+Texts from our own SMS number (or a number texting itself) get no reply, so replies can't loop.
+TODO(blocked: needs live verification) A handset texting the number is untested. See the README.
 """
 import json
 from urllib.parse import parse_qsl
@@ -35,19 +35,28 @@ def conversation_id(sender: str) -> str:
     return config.SMS_CONVERSATION_PREFIX + "".join(ch for ch in sender if ch.isdigit())
 
 
-def parse_inbound(raw: str, content_type: str) -> tuple[str, str, str]:
-    """Return (format, sender, body) for either inbound payload."""
+def parse_inbound(raw: str, content_type: str) -> tuple[str, str, str, str]:
+    """Return (format, sender, recipient, body) for either inbound payload."""
     if content_type.startswith("application/json"):
         message = json.loads(raw or "{}").get("message") or {}
-        return "swml", str(message.get("from", "")), str(message.get("body") or "")
+        return "swml", str(message.get("from", "")), str(message.get("to", "")), str(message.get("body") or "")
     form = dict(parse_qsl(raw))
-    return "cxml", form.get("From", ""), form.get("Body", "")
+    return "cxml", form.get("From", ""), form.get("To", ""), form.get("Body", "")
 
 
-def render_reply(fmt: str, text: str) -> Response:
+def is_own_number(sender: str, recipient: str) -> bool:
+    """A text from our SMS number, or a number texting itself. Answering it would loop:
+    each reply arrives back at /sms as a new inbound text (seen live in recipe 29)."""
+    return bool(sender) and sender in {recipient, config.SMS_NUMBER}
+
+
+def render_reply(fmt: str, text: str | None) -> Response:
+    """Messaging SWML or cXML. text=None sends no reply at all."""
     if fmt == "swml":
-        return JSONResponse({"version": "1.0.0", "sections": {"main": [{"reply": text}]}})
-    xml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escape(text)}</Message></Response>'
+        main = [{"reply": text}] if text is not None else []
+        return JSONResponse({"version": "1.0.0", "sections": {"main": main}})
+    message = f"<Message>{escape(text)}</Message>" if text is not None else ""
+    xml = f'<?xml version="1.0" encoding="UTF-8"?><Response>{message}</Response>'
     return Response(xml, media_type="application/xml")
 
 
@@ -92,7 +101,9 @@ class SmsConcierge(HotelConcierge):
                 config.PUBLIC_URL.rstrip("/") + config.SMS_ROUTE, raw,
             ):
                 return Response(status_code=403)
-            fmt, sender, body = parse_inbound(raw, request.headers.get("content-type", ""))
+            fmt, sender, recipient, body = parse_inbound(raw, request.headers.get("content-type", ""))
+            if is_own_number(sender, recipient):
+                return render_reply(fmt, None)
             return render_reply(fmt, await self.answer(sender, body))
 
         return router
