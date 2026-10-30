@@ -1,0 +1,11 @@
+id: 05-package-tracking-line
+title: AI Package Tracking Line
+group: A
+capability: [voice, ai-agent]
+language: python
+difficulty: beginner
+size: S
+status: ready
+primitives: [datamap, add_language]
+channels: [voice]
+external: []

@@ -1,0 +1,36 @@
+{
+  "function": "track_package",
+  "description": "Get the delivery status for one tracking number.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "tracking_number": {
+        "type": "string",
+        "description": "The tracking number, digits only, no spaces or dashes"
+      }
+    },
+    "required": [
+      "tracking_number"
+    ]
+  },
+  "data_map": {
+    "webhooks": [
+      {
+        "url": "https://raw.githubusercontent.com/signalwire-demos/ai-recipes/main/recipes/05-package-tracking-line/data/mock-api/${enc:args.tracking_number}.json",
+        "method": "GET",
+        "headers": {
+          "Accept": "application/json"
+        },
+        "error_keys": [
+          "error"
+        ],
+        "output": {
+          "response": "Package ${input.args.tracking_number} is ${status}. ${detail} The last scan was in ${last_location} on ${last_scan}."
+        }
+      }
+    ],
+    "output": {
+      "response": "I couldn't find tracking number ${args.tracking_number}. Ask the caller to read it again, one digit at a time."
+    }
+  }
+}
