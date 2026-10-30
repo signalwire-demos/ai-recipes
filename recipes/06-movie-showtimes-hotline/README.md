@@ -101,6 +101,32 @@ python ../../scripts/validate_swml.py showtimes.swml.yaml
 The tests run `get_showtimes` through the SDK's DataMap simulator, the engine behind
 `swaig-test --exec`, against a local copy of the feed and the fixtures in `tests/fixtures/`.
 
+### Troubleshooting: see the lookup run on a live call (optional)
+
+The `data_map` runs on SignalWire, so nothing reaches a server of yours and the call logs
+don't show the fetch. To watch it, add a debug webhook to the `ai` verb **for one test call
+only**, pointing at any HTTPS endpoint that accepts POSTs (a request bin, or a small local
+server behind a tunnel):
+
+```yaml
+    - ai:
+        params:
+          debug_webhook_url: https://your-receiver.example.com/debug
+          debug_webhook_level: 2        # 0-2; 1 is the default when a URL is set
+        # ...the rest of the ai verb unchanged
+```
+
+SignalWire then POSTs one JSON event per step. For this tool, look for `swaig_call` with
+`command_name: get_showtimes`, `webhook_log.request_url` (the feed URL it fetched),
+`webhook_reply` (the feed it got back) and `function_call.duration_ms`. The `conversation_add`
+events show what the agent then said. Remove the `params` block before you save the script for
+real callers: the debug payloads include the caller's number and the whole conversation.
+
+Verified on a live call (2026-10-30, inbound call `074a6a96-1ddc-425c-b2f2-09badf4310a5`):
+the platform fetched the feed from GitHub raw in 281 ms, built "Today's showtimes: The
+Lighthouse at Gull Point, rated PG, 104 minutes, ..." with `foreach`, and the agent read back
+all three films and then only Paper Kites' times when asked.
+
 ## Deploy
 
 It's already deployed once the script is saved in your Space. To change showtimes, edit
