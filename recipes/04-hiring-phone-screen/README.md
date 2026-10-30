@@ -80,6 +80,16 @@ For an inbound test, set the phone number's call handler to `https://USER:PASS@<
 (USER/PASS = SWML_BASIC_AUTH_USER/PASSWORD) and call it. Without `?candidate=`, the file is named
 `call-<first 8 chars of the call id>.json`.
 
+Live-tested 2026-10-30, outbound call `ae670461-701b-4cc9-bd5c-23adbccd40c6` (121 s).
+`call_candidate.py C-L1-a1` dialed `OUTBOUND_1` -> `TEST_INBOUND`, where a scripted answerer
+replied. The platform log shows `gather_start` (5 questions), then `gather_question` 0 to 4 in
+config order. `work_authorized` and `earliest_start` had `requires_confirm: true` and were
+submitted with `confirmed_by_user` only after the read-back. Then `gather_complete` moved the
+call `screen -> submit (gather_complete)`, and `submit_screen` moved it
+`submit -> wrap_up (webhook_action)`. The handler wrote `data/candidates/C-L1-a1.json`
+(`complete: true`, `work_authorized: true`, `years_experience: 6`, `earliest_start: "Monday,
+November 9"`, and the pay range and reason verbatim). The file name came from the dial URL.
+
 Without a phone:
 
 ```bash
