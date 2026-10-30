@@ -1,0 +1,11 @@
+id: 09-insurance-claim-intake
+title: AI Insurance Claim Intake
+group: B
+capability: [voice, ai-agent, outbound]
+language: python
+difficulty: intermediate
+size: M
+status: ready
+primitives: [contexts-steps, gather, set_functions, valid_steps, global_data, hold, rpc_dial, execute_rpc, join_conference, swml_change_step]
+channels: [voice]
+external: []
