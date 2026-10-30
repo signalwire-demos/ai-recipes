@@ -72,4 +72,8 @@ def render(rows: list[dict], matrix: dict[str, dict] | None = None, attempted: d
                  f"{r['turns']}" + (f" ({r['omitted']} untimed)" if r["omitted"] else "")]
         cells += [f"{_ms(r[s][0])} / {_ms(r[s][1])}" for s in SEGMENTS]
         lines.append("| " + " | ".join(cells) + " |")
+    notes = [f"- {r['config']}: {matrix[r['config']]['known_issue']}" for r in rows
+             if matrix.get(r["config"], {}).get("known_issue")]
+    if notes:
+        lines += ["", "Known issues:"] + notes
     return "\n".join(lines) + "\n"

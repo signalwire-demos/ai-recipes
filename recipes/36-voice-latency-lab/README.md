@@ -129,6 +129,21 @@ covers that run's calls only. "Calls" reads `received of placed`, so a configura
 produce no post-prompt report (a voice or model the Space can't open, say) shows up as `0 of N`
 instead of dropping out of the table.
 
+**Known issue: `gpt-4.1-nano` (as of 2026-10-30).** Some calls on `nano-rime` get no answer
+at all: the platform fetches the SWML, the agent never speaks or calls `check_hours`, no
+post-prompt arrives, and the call ends after about 18 s. The REST call log for the agent's
+inbound leg (`client.logs.voice.list_events(<call id>)`) shows the cause. Every assistant turn
+logs `calling_error` with `error_code` 404, `model_not_found`: "The model
+`gpt-4.1-nano-2025-04-14` has been deprecated". It hits some platform nodes and not others,
+whatever the voice. On 7 live calls it failed 4 times: twice with `rime.spore` and twice
+with `gcloud.en-US-Neural2-F`. `gpt-4.1-mini` with the same voices never failed. That's why
+`mini-rime` is the default (the baseline), and why the Google-voice row is `mini-gcloud`
+(earlier this was `nano-gcloud`, which failed both of its first live runs). `nano-rime` stays
+in the matrix with `known_issue` set in `config.py`, so the report prints the note under the
+table, and its failed calls show as `k of N`. If the same thing happens with another model,
+look in that log first. A failure like this doesn't show in your app's log, because only the
+platform sees the model's error.
+
 Without a phone:
 
 ```bash
@@ -153,6 +168,7 @@ fit for the lab: the payloads are written to the local `data/runtime/runs`.
 ## What to change first
 
 Open `config.py` and edit `CONFIGS`, the configuration matrix: one entry per model and voice
-pair to compare (keep the first entry as your baseline). Then set `CALLER_SCRIPT` to the lines
+pair to compare (keep the first entry as your baseline). An optional `known_issue` string on an
+entry is printed under the report table and never reaches the SWML. Then set `CALLER_SCRIPT` to the lines
 that match your real calls (a tool-heavy turn and a chit-chat turn measure different things),
 and `CALLER_PAUSE_SECS` so the agent has time to answer.

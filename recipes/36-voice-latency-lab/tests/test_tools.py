@@ -34,10 +34,10 @@ def test_pick_config_is_whitelisted(q, expected):
 
 def test_on_summary_files_payload_under_its_config(agent, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "RUNS_DIR", tmp_path)
-    agent.on_summary({}, {"call_id": "abc/../123", "global_data": {"lab_config": "nano-gcloud"}, "raw_call_log": []})
+    agent.on_summary({}, {"call_id": "abc/../123", "global_data": {"lab_config": "mini-gcloud"}, "raw_call_log": []})
     saved = list(tmp_path.glob("*/*.json"))
-    assert [p.relative_to(tmp_path).as_posix() for p in saved] == ["nano-gcloud/abc123.json"]
-    assert json.loads(saved[0].read_text())["global_data"]["lab_config"] == "nano-gcloud"
+    assert [p.relative_to(tmp_path).as_posix() for p in saved] == ["mini-gcloud/abc123.json"]
+    assert json.loads(saved[0].read_text())["global_data"]["lab_config"] == "mini-gcloud"
 
 
 def test_on_summary_ignores_payload_without_known_config(agent, tmp_path, monkeypatch):
