@@ -22,10 +22,13 @@ Only an opaque, one-time token goes into the transfer URL (`/booking?h=<token>`)
 agent's dynamic config callback (`from_handoff`) claims the record (read once, then deleted)
 and rebuilds `global_data` from it. The booking tools take no destination or party-size
 arguments: `search_flights` and `hold_flight` read them from `global_data.trip`, so the model
-can't book a different trip. `search_flights` also reads the options aloud with a `say` action,
-so the caller always hears the real inventory from code. The model can still talk about flights
-that don't exist (it did on two test calls), but `hold_flight` only accepts a flight ID from
-the real list, so a made-up flight can't be held.
+can't book a different trip. The model can't hold a flight
+that isn't in the results either. `search_flights` numbers the matching flights, stores them in
+`global_data.options` (`"1"`, `"2"`, ...), and returns only "Option 1: departing ..." lines with
+no flight IDs. `hold_flight` takes an option number, and code maps it to the stored flight
+(re-checked against the inventory). Any other number is refused. The booking agent runs on
+`gpt-4.1-mini` (`config.BOOKING_MODEL`). On earlier test calls, the default model read back
+flights that didn't exist.
 
 The way back works the same way. `return_to_concierge` writes a new record with a fresh token:
 the original summary plus the booking result (`ref`, flight, readback), or none if nothing was
@@ -81,7 +84,8 @@ stateDiagram-v2
 | Handler-written handoff record + one-time token | `handoff.py` (`save`, `claim`) |
 | `set_dynamic_config_callback` rebuilds context | `app.py`, `BookingDesk.from_handoff`, `ConciergeDesk.from_booking` |
 | Tools read trip from `global_data`, not args | `app.py`, `search_flights` and `hold_flight` |
-| `say` reads the inventory verbatim | `app.py`, `search_flights` |
+| Numbered options in `global_data`, mapped back by code | `app.py`, `search_flights` and `hold_flight` |
+| `set_prompt_llm_params(model=...)` | `app.py`, `BookingDesk.__init__` (`config.BOOKING_MODEL`) |
 | `set_functions` / `set_valid_steps([])` / `swml_change_step` | `app.py`, both agents' steps |
 
 ## Prerequisites
@@ -115,7 +119,7 @@ ngrok http 3000                    # in another terminal; put the URL in PUBLIC_
 In the SignalWire Dashboard, set the phone number's call handler to
 `https://USER:PASS@<your-tunnel>/concierge` (USER/PASS = SWML_BASIC_AUTH_USER/PASSWORD), then
 call it. Try: "When's a good time to visit Lisbon?", then "Book it for two of us in December."
-At the booking desk: "The evening flight on the 11th, please", then "That's all, thanks."
+At the booking desk: "Option two, the one on the 11th, please", then "That's all, thanks."
 
 Without a phone:
 
@@ -143,7 +147,7 @@ instance or deploying to Lambda.
 
 ## What to change first
 
-Open `config.py`: set `AGENCY_NAME`, the two voices, `MAX_TRAVELERS`, and point
+Open `config.py`: set `AGENCY_NAME`, the two voices, `BOOKING_MODEL`, `MAX_TRAVELERS`, and point
 `DESTINATIONS_FILE` at your inventory. `HANDOFF_FILE` and `HANDOFF_TTL_SECS` control the handoff
 store. To add another specialist (hotels, cars), copy `BookingDesk`, give it its own route and
 tools, and register it with `server.register(...)`.

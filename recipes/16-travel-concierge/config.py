@@ -33,6 +33,7 @@ AGENCY_NAME = "Example Travel"
 CONCIERGE_VOICE = "rime.spore"               # any SignalWire TTS voice id
 BOOKING_VOICE = "rime.spore"                  # use a different voice to make the handoff audible
 LANGUAGE_CODE = "en-US"
+BOOKING_MODEL = os.environ.get("BOOKING_MODEL", "gpt-4.1-mini")   # set_prompt_llm_params(model=...)
 DESTINATIONS_FILE = HERE / "data" / "destinations.json"   # mock inventory: swap for your GDS / API
 MAX_TRAVELERS = 6
 
