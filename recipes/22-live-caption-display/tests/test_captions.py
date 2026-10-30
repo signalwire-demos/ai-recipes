@@ -15,7 +15,6 @@ import config
 from consumer import TranscriptStore
 from replay import restamp
 
-CALL = "c0ffee00-0000-4000-8000-000000000021"
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"recipe:test-pass").decode()}
 
 
@@ -41,8 +40,9 @@ def test_captions_page_requires_auth_and_subscribes_to_sse(svc, tmp_path):
 
 def test_restamp_sets_a_measurable_delay(meeting_events):
     body = restamp(meeting_events[0], now=1793000100.0, delay_s=0.5)
-    assert body["transcribe_event"]["ts"] == 1793000099_500000
-    assert meeting_events[0]["transcribe_event"]["ts"] == 1793000000_000000  # original untouched
+    assert body["utterance"]["timestamp"] == 1793000099_500000
+    assert meeting_events[0]["utterance"]["timestamp"] == 1793000003_100000  # original untouched
+    assert restamp(meeting_events[-1], 1.0, 0.1) == meeting_events[-1]       # conversation_log
 
 
 def free_port():
@@ -51,7 +51,7 @@ def free_port():
         return s.getsockname()[1]
 
 
-def test_replayed_fixture_stream_carries_what_the_page_draws(svc, tmp_path, meeting_events):
+def test_replayed_fixture_stream_carries_what_the_page_draws(svc, tmp_path, meeting_events, partial_events):
     """Replay the whole fixture call; the SSE stream must deliver partial and final segments,
     in arrival order, each with a server-measured delay the page shows."""
     port = free_port()
@@ -64,15 +64,17 @@ def test_replayed_fixture_stream_carries_what_the_page_draws(svc, tmp_path, meet
             break
         time.sleep(0.05)
     try:
-        with httpx.stream("GET", f"{base}/events", params={"call_id": CALL}, headers=AUTH, timeout=5) as r:
+        with httpx.stream("GET", f"{base}/events", headers=AUTH, timeout=5) as r:  # all calls
             assert r.headers["content-type"].startswith("text/event-stream")
-            for body in meeting_events:
+            bodies = partial_events + meeting_events       # conversation_log at the end: no event
+            for body in bodies:
                 httpx.post(f"{base}/transcript", json=restamp(body, time.time(), 0.4), headers=AUTH)
             lines = r.iter_lines()
-            got = [json.loads(next(l for l in lines if l.startswith("data: "))[6:]) for _ in meeting_events]
+            got = [json.loads(next(l for l in lines if l.startswith("data: "))[6:]) for _ in bodies[:-1]]
     finally:
         server.should_exit = True
-    assert [(s["speaker"], s["is_final"]) for s in got] == [
-        (e["transcribe_event"]["direction"], e["transcribe_event"]["type"] == "final") for e in meeting_events]
-    assert [s["text"] for s in got if s["is_final"]][0].startswith("Good morning everyone")
+    assert [(s["speaker"], s["is_final"], s["text"]) for s in got] == [
+        (b["utterance"]["role"], b["utterance"].get("is_final", True), b["utterance"]["content"])
+        for b in bodies[:-1]]
+    assert sum(not s["is_final"] for s in got) == 3          # the page draws these grey
     assert all(350 <= s["delay_ms"] <= 2000 for s in got)  # 0.4 s simulated + local hop

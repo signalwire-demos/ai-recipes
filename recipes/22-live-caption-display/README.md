@@ -9,6 +9,8 @@ transcribes both legs and POSTs each partial and final result to this app, which
 pushes it over Server-Sent Events. Open `http://localhost:3000/captions` in a browser, using the
 same username and password as the SWML route. The page draws partial text in grey italics, swaps
 it for solid text when the final result arrives, and shows the measured delay next to every line.
+On today's platform only final utterances have been seen, so expect solid lines (see the TODO
+below).
 The transcript pipeline is recipe #21, copied in so this folder stands alone.
 
 ## What it demonstrates
@@ -42,13 +44,17 @@ stateDiagram-v2
 | SSE fan-out, replay on connect | `consumer.py`, `Broker`, `GET /events` |
 | Captions page (partial grey, final solid, delay badge) | `static/captions.html`, served at `GET /captions` in `app.py` |
 
-### What is not confirmed yet
+### The event payload and what is not confirmed yet
 
-- `TODO(blocked: payload undocumented)`. The live_transcribe webhook body has no published schema.
-  The fixtures in `data/fixtures/` are a best guess (see `adapter.py`). After a live call, compare
-  `data/runtime/transcripts/<call_id>.raw.jsonl` with the fixtures and trim `adapter.py`. If the
-  real payload carries no event timestamp, `delay_ms` falls back to 0. The page then shows 0 ms,
-  and the TODO stays open.
+`adapter.py` reads the payload captured from a live call on 2026-10-30 (see #21). Each final
+utterance carries `utterance.timestamp` in microseconds, and the measured delay on that call was
+80 to 300 ms. The greeting played by the SWML is transcribed too, labeled with the `local-caller`
+leg.
+
+- `TODO(blocked: partial events not observed)`. The live call delivered only final utterances,
+  even with `live_events: true`. On a real call today, every line appears solid. The grey partial
+  path is driven by `data/fixtures/partials-synthetic.jsonl`, a guess (`"is_final": false`
+  sharing the final's `utterance_id`), until the platform is seen sending partials.
 - `TODO(blocked: conference behavior undocumented)`. This is a single-call dial-in, like #21.
 - The delay is only as good as the clock sync between SignalWire and your server. Run NTP.
 
@@ -84,12 +90,13 @@ In the SignalWire Dashboard, set the phone number's call handler to
 Without a phone, replay the fixture call into the running app while the page is open:
 
 ```bash
-python replay.py                   # paced like the original call; --speed 4 to hurry
-# then open the URL it prints: /captions?call_id=c0ffee00-0000-4000-8000-000000000021
+python replay.py                   # the meeting call (final utterances), paced like the original
+python replay.py --file data/fixtures/partials-synthetic.jsonl   # grey partials, then a final
 ```
 
-`replay.py` moves each event's timestamp to "now minus 0.25 to 1.2 s", so the delay badges show
-believable numbers.
+Open `http://localhost:3000/captions` first (it follows all calls), or the `?call_id=` URL that
+`replay.py` prints. `replay.py` moves each event's timestamp to "now minus 0.08 to 0.6 s", so
+the delay badges show believable numbers.
 
 ```bash
 pytest -q
