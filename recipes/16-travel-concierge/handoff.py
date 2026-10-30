@@ -1,7 +1,8 @@
-"""A small, short-lived handoff store: token -> {summary, trip, call_id, created}.
+"""A small, short-lived, one-time handoff store: token -> {summary, trip|booking, call_id, created}.
 
-The concierge's handler writes a record and puts only the opaque token in the transfer URL.
-The booking agent's dynamic config callback reads it back. No transcript is ever stored.
+The sending agent's handler writes a record and puts only the opaque token in the transfer URL.
+The receiving agent's dynamic config callback claims it (read once, then deleted). No transcript
+is ever stored.
 Swap this JSON file for Redis (SET with EX) or your database in production.
 """
 import json
@@ -45,9 +46,13 @@ def load(token: str | None) -> dict | None:
     return record if record and _fresh(record) else None
 
 
-def update(token: str, **fields) -> None:
+def claim(token: str | None) -> dict | None:
+    """Load a record and delete it, so a token works for exactly one transfer."""
+    if not token:
+        return None
     with _lock:
         records = _read()
-        if token in records:
-            records[token].update(fields)
+        record = records.pop(token, None)
+        if record is not None:
             _write(records)
+    return record if record and _fresh(record) else None
