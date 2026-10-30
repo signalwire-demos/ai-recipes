@@ -1,0 +1,11 @@
+id: 20-absence-reporting
+title: Absence Reporting Line
+group: B
+capability: [voice, ai-agent]
+language: python
+difficulty: beginner
+size: S
+status: proposed
+primitives: [contexts-steps, set_functions, valid_steps, swml_change_step, global_data, add_language, grammar-filling]
+channels: [voice]
+external: []
