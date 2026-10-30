@@ -142,6 +142,11 @@ def test_governance_confirmed_has_no_functions(swml):
     assert steps_of(swml)["confirmed"]["functions"] == []
 
 
+def test_governance_confirmed_is_the_end_with_no_next_step(swml):
+    confirmed = steps_of(swml)["confirmed"]
+    assert confirmed["valid_steps"] == [] and confirmed["end"] is True
+
+
 def test_governance_take_booking_exposes_only_book_table(swml):
     step = steps_of(swml)["take_booking"]
     assert step["functions"] == ["book_table"]
