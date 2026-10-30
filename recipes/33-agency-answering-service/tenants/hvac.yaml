@@ -1,0 +1,19 @@
+id: hvac
+name: Northwind Heating and Air
+numbers: ["${TENANT_2}"]
+voice: gcloud.en-US-Neural2-D
+timezone: America/Chicago
+hours:
+  monday: "07:00-19:00"
+  tuesday: "07:00-19:00"
+  wednesday: "07:00-19:00"
+  thursday: "07:00-19:00"
+  friday: "07:00-19:00"
+  saturday: "08:00-14:00"
+prompt: >-
+  You answer the phone for Northwind Heating and Air. Take service requests and decide
+  with the caller whether it is an emergency (no heat below freezing, gas smell, water
+  leak from equipment). For a gas smell, tell them to leave the building and call 911 first.
+tools: [check_hours, take_message, dispatch_technician]
+transfer_targets:
+  on_call_tech: "${HVAC_ON_CALL}"   # emergencies go here, any hour

@@ -1,0 +1,19 @@
+id: law
+name: Hale and Ortiz Law
+numbers: ["${TENANT_3}"]
+voice: gcloud.en-US-Neural2-J
+timezone: America/Chicago
+hours:
+  monday: "09:00-17:00"
+  tuesday: "09:00-17:00"
+  wednesday: "09:00-17:00"
+  thursday: "09:00-17:00"
+  friday: "09:00-17:00"
+prompt: >-
+  You answer the phone for Hale and Ortiz Law. You are not a lawyer: never give legal
+  advice or predict outcomes. Help callers request a consultation, check office hours,
+  leave a message, or reach the intake desk during office hours.
+tools: [check_hours, take_message, request_consultation, transfer_call]
+practice_areas: [family, estate, business, real_estate]
+transfer_targets:
+  intake_desk: "${LAW_INTAKE_DESK}"

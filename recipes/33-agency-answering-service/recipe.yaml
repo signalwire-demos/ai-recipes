@@ -1,0 +1,11 @@
+id: 33-agency-answering-service
+title: AI Answering Service for Agencies
+group: D
+capability: [voice, ai-agent, multi-tenant]
+language: python
+difficulty: advanced
+size: L
+status: ready
+primitives: [dynamic-config, define_tool, add_swaig_query_params, global_data, connect, tenant-yaml]
+channels: [voice]
+external: []

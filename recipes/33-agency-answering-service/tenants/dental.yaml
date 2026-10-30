@@ -1,0 +1,19 @@
+# One file per tenant. Drop a new file here to add a tenant; no redeploy.
+id: dental
+name: Bright Smile Dental
+numbers: ["${TENANT_1}"]          # called numbers that route to this tenant (env vars expand)
+voice: gcloud.en-US-Neural2-F
+timezone: America/Chicago
+hours:                            # 24h local time; a missing day is closed
+  monday: "08:00-17:00"
+  tuesday: "08:00-17:00"
+  wednesday: "08:00-17:00"
+  thursday: "08:00-17:00"
+  friday: "08:00-13:00"
+prompt: >-
+  You answer the phone for Bright Smile Dental. Help callers request an appointment,
+  check office hours, or leave a message. Never give medical or dental advice; for pain
+  or swelling, offer to transfer to the front desk during office hours.
+tools: [check_hours, take_message, book_appointment, transfer_call]
+transfer_targets:                 # name -> number; only these names can be transferred to
+  front_desk: "${DENTAL_FRONT_DESK}"
