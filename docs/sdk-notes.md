@@ -345,7 +345,7 @@ track = (DataMap("track_package")
          .purpose("Get the delivery status for a tracking number")
          .parameter("tracking_number", "string", "The tracking number", required=True)
          .webhook("GET", "https://raw.githubusercontent.com/signalwire-demos/ai-recipes/main/recipes/05-x/data/${args.tracking_number}.json")
-         .output(FunctionResult("The package is ${response.status}, last seen in ${response.location}."))
+         .output(FunctionResult("Package ${input.args.tracking_number} is ${status}, last seen in ${location}."))
          .fallback_output(FunctionResult("I couldn't find that tracking number.")))
 agent.register_swaig_function(track.to_swaig_function())
 ```
@@ -355,7 +355,9 @@ agent.register_swaig_function(track.to_swaig_function())
 `body(dict)`, `params(dict)`, `output(FunctionResult)`, `fallback_output(FunctionResult)`,
 `expression(test_value, pattern, output, nomatch_output=None)`, `foreach(dict)`, `error_keys`,
 `global_error_keys`, `webhook_expressions`. Shortcuts: `signalwire.create_simple_api_tool`,
-`create_expression_tool`. `swaig-test --exec track_package --tracking_number X --verbose` simulates
+`create_expression_tool`. **Variable scopes (checked against the 3.7.5 simulator):** inside a webhook's `output`, response fields are read from the root (`${status}`, not `${response.status}`), and function arguments are `${input.args.x}`. `${args.x}` works only in the webhook URL and in `fallback_output`. Writing `${response.x}` renders an empty string. The simulator blocks localhost URLs unless `SWML_ALLOW_PRIVATE_URLS=true` is set. Working example: `recipes/05-package-tracking-line`.
+
+`swaig-test --exec track_package --tracking_number X --verbose` simulates
 the pipeline locally.
 
 ## MCP
