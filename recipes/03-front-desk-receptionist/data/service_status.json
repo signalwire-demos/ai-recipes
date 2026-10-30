@@ -1,0 +1,5 @@
+{
+  "internet": {"status": "degraded", "note": "Slow speeds in the north district, fix expected by 6 PM."},
+  "tv":       {"status": "ok", "note": ""},
+  "phone":    {"status": "ok", "note": ""}
+}

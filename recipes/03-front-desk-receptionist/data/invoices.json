@@ -1,0 +1,5 @@
+{
+  "INV-1001": {"customer": "Test Customer A", "amount": 59.99, "status": "paid"},
+  "INV-1002": {"customer": "Test Customer B", "amount": 249.00, "status": "paid"},
+  "INV-1003": {"customer": "Test Customer C", "amount": 39.99, "status": "refunded"}
+}
