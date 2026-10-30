@@ -1,0 +1,11 @@
+id: 35-bilingual-support-line
+title: AI Bilingual Support Line
+group: D
+capability: [voice, ai-agent, multilingual]
+language: python
+difficulty: beginner
+size: S
+status: ready
+primitives: [add_language, languages_enabled, internal-fillers, contexts-steps, set_functions, valid_steps, swml_change_step, global_data]
+channels: [voice]
+external: []

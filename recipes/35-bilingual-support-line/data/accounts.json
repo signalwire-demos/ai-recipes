@@ -1,0 +1,10 @@
+{
+  "accounts": {
+    "100234": {"first_name": "Dana", "zip": "74101", "plan": "fiber-500", "amount_due": 54.99, "due_date": "2026-11-15", "internal_risk_flag": "none", "billing_notes": "autopay off"},
+    "100877": {"first_name": "Luis", "zip": "74103", "plan": "fiber-1000", "amount_due": 0.0, "due_date": "2026-11-20", "internal_risk_flag": "watch", "billing_notes": "courtesy credit 2026-09"},
+    "101555": {"first_name": "Marisol", "zip": "74105", "plan": "cable-200", "amount_due": 79.5, "due_date": "2026-11-02", "internal_risk_flag": "none", "billing_notes": ""}
+  },
+  "outages": {
+    "74103": {"cause": "fiber_cut", "restore_eta": "2026-10-31T14:00:00-05:00"}
+  }
+}
