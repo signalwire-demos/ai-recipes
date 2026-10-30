@@ -59,7 +59,9 @@ class AbsenceAgent(AgentBase):
             .set_valid_steps([])
         ctx.add_step("done") \
             .set_text("Give the caller reference ${global_data.reference}, then say goodbye.") \
-            .set_functions([])  # explicit: no tools after submitting
+            .set_functions([]) \
+            .set_valid_steps([]) \
+            .set_end(True)  # explicit: no tools after submitting
 
         self.define_tool(
             name="record_slots",

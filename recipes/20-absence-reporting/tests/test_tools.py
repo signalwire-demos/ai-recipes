@@ -189,3 +189,10 @@ def test_governance_every_slot_is_optional_in_the_tool_schema(ai):
     fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "record_slots")
     assert set(fn["parameters"]["properties"]) == set(config.SLOTS)
     assert not fn["parameters"].get("required")
+
+
+def test_governance_done_is_terminal(steps):
+    # Without valid_steps the platform offers next_step on the last step, and the model can
+    # loop on it (seen live in #7, #10, #12, #13). The last step ends the flow.
+    final = steps["done"]
+    assert final["functions"] == [] and final["valid_steps"] == [] and final["end"] is True
