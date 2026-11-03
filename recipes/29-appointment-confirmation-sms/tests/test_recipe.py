@@ -1,11 +1,14 @@
 """Handler tests (direct calls, assert on FunctionResult actions), the inbound SMS webhook
 (laml_webhooks form POST), dynamic config, and governance assertions on the dumped SWML."""
+import hashlib
+import hmac
 import json
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
 
@@ -15,6 +18,7 @@ sys.path.insert(0, str(RECIPE))
 import config  # noqa: E402
 from app import ConfirmationAgent, cxml_reply, find_booking, load_bookings  # noqa: E402
 
+KEY, BASE = "PSK_test", "https://clinic.example.com"
 SEED = [{"confirmation": "AC-1001", "phone": "+15550142", "name": "Jordan Example",
          "date": "2026-11-03", "time": "09:00"}]
 
@@ -26,12 +30,19 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "BOOKINGS_FILE", path)
     monkeypatch.setattr(config, "SMS_FROM", "+15550100")
     monkeypatch.setattr(config, "DIAL_FROM", "+15550101")
+    monkeypatch.setattr(config, "SIGNING_KEY", KEY)
+    monkeypatch.setattr(config, "PUBLIC_URL", BASE)
     return path
 
 
 @pytest.fixture(scope="module")
 def agent():
     return ConfirmationAgent()
+
+
+@pytest.fixture(autouse=True)
+def no_cooldown(agent):
+    agent._last_dial.clear()  # the agent is shared by the module; each test starts with no calls made
 
 
 def actions(result):
@@ -121,9 +132,16 @@ def client(agent):
     return TestClient(agent.get_app())
 
 
-def post_sms(client, sender, body):
-    form = {"MessageSid": "SM0001", "From": sender, "To": "+15550100", "Body": body}
-    return client.post(config.SMS_ROUTE, data=form)  # form-encoded, like laml_webhooks
+def sign(raw):
+    """SignalWire's scheme A: hex HMAC-SHA1 of the URL it posted to plus the raw body."""
+    return hmac.new(KEY.encode(), (BASE + config.SMS_ROUTE + raw).encode(), hashlib.sha1).hexdigest()
+
+
+def post_sms(client, sender, body, signature=None):
+    raw = urlencode({"MessageSid": "SM0001", "From": sender, "To": "+15550100", "Body": body})
+    headers = {"content-type": "application/x-www-form-urlencoded",  # like laml_webhooks
+               "X-SignalWire-Signature": sign(raw) if signature is None else signature}
+    return client.post(config.SMS_ROUTE, content=raw, headers=headers)
 
 
 def test_inbound_reply_maps_to_booking_and_builds_the_dial(agent, client, monkeypatch):
@@ -154,9 +172,42 @@ def test_inbound_from_unknown_number(agent):
     assert "couldn't find a booking" in agent.handle_sms("+15550199", "change it")
 
 
-def test_signature_required_when_signing_key_set(client, monkeypatch):
-    monkeypatch.setattr(config, "SIGNING_KEY", "PSK_test")
-    assert post_sms(client, "+15550142", "hi").status_code == 403
+@pytest.mark.parametrize("signature", ["", "0" * 40])
+def test_unsigned_or_badly_signed_sms_is_refused(agent, client, monkeypatch, signature):
+    # A forged From must neither read the booking back nor ring the customer's phone.
+    monkeypatch.setattr(agent, "dial_back", lambda b: pytest.fail("should not dial"))
+    for body in ("change it", "thanks"):
+        r = post_sms(client, "+15550142", body, signature=signature)
+        assert r.status_code == 403 and "AC-1001" not in r.text
+
+
+def test_no_signing_key_refuses_every_sms(agent, client, monkeypatch):
+    monkeypatch.setattr(config, "SIGNING_KEY", "")
+    monkeypatch.setattr(agent, "dial_back", lambda b: pytest.fail("should not dial"))
+    r = client.post(config.SMS_ROUTE, data={"From": "+15550142", "To": "+15550100", "Body": "change"})
+    assert r.status_code == 403
+
+
+def test_dial_back_cooldown_rings_once_per_booking(agent, client, monkeypatch):
+    dialed = []
+    monkeypatch.setattr(agent, "dial_back", lambda b: dialed.append(b["confirmation"]))
+    replies = [post_sms(client, "+15550142", "change it").text for _ in range(5)]
+    assert dialed == ["AC-1001"]  # five CHANGE texts, one call
+    assert "calling you now" in replies[0] and all("just called" in r for r in replies[1:])
+    # Another booking has its own cooldown.
+    store = json.loads(config.BOOKINGS_FILE.read_text())
+    config.BOOKINGS_FILE.write_text(json.dumps(store + [{**SEED[0], "confirmation": "AC-1002", "phone": "+15550177"}]))
+    post_sms(client, "+15550177", "change")
+    assert dialed == ["AC-1001", "AC-1002"]
+
+
+def test_dial_back_allowed_again_after_the_cooldown(agent, monkeypatch):
+    dialed = []
+    monkeypatch.setattr(agent, "dial_back", lambda b: dialed.append(b["confirmation"]))
+    clock = iter([1000.0, 1000.0 + 60, 1000.0 + config.DIAL_BACK_COOLDOWN_MINUTES * 60 + 1])
+    monkeypatch.setattr("app.monotonic", lambda: next(clock))
+    replies = [agent.handle_sms("+15550142", "change") for _ in range(3)]
+    assert dialed == ["AC-1001", "AC-1001"] and "just called" in replies[1]
 
 
 def test_cxml_reply_escapes_text():

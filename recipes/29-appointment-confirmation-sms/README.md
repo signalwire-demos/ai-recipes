@@ -11,7 +11,8 @@ number, and tells the caller the text is on its way. If the customer later repli
 places a REST call back to them. That call opens on the reschedule step with the booking
 already loaded, so the agent greets them by name and only asks for the new slot. Any other
 reply gets the booking details texted back. A text from the SMS number itself gets no reply,
-so the number can't loop on its own answers.
+so the number can't loop on its own answers. A booking gets at most one call back every
+`DIAL_BACK_COOLDOWN_MINUTES` (10), so a burst of CHANGE texts rings the phone once.
 
 ## What it demonstrates
 
@@ -61,7 +62,8 @@ sequenceDiagram
 | `set_dynamic_config_callback` + `set_initial_step` | `app.py`, `preload()` |
 | REST `calling.dial` | `app.py`, `dial_request()` / `dial_back()` |
 | Inbound SMS (laml_webhooks form POST, cXML reply) | `app.py`, `sms_router()` and `handle_sms()` |
-| `validate_webhook_signature` (optional) | `app.py`, `sms_router()` |
+| `validate_webhook_signature` (required) | `app.py`, `sms_router()` |
+| Per-booking call-back cooldown | `app.py`, `handle_sms()` |
 
 ## Prerequisites
 
@@ -87,9 +89,14 @@ pip install -r requirements.txt
 cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL and basic auth
 ```
 
-In `.env`, also set `SMS_1` (the sender, your SMS-registered number) and `OUTBOUND_1` (caller
-ID for the call back). Optional: `SIGNALWIRE_SIGNING_KEY` (Dashboard, API page) makes `/sms`
-and the agent routes reject requests without a valid `X-SignalWire-Signature`.
+In `.env`, also set `SMS_1` (the sender, your SMS-registered number), `OUTBOUND_1` (caller
+ID for the call back) and `SIGNALWIRE_SIGNING_KEY` (Dashboard > API, the **Signing Key**).
+The signing key is required: without it `/sms` answers 403 to everything and the app logs
+`sms_disabled` at startup. `/sms` looks the booking up by the `From` number and can place a
+call, so an unsigned POST with a forged `From` would read someone's booking or ring their
+phone. With the key set, `/sms` and the agent routes accept only requests with a valid
+`X-SignalWire-Signature`, and `PUBLIC_URL` must be the exact URL SignalWire posts to, because
+the signature covers it. Optional: `DIAL_BACK_COOLDOWN_MINUTES` (default 10).
 
 `data/bookings.json` ships with one fake booking (`AC-1001` for +1 555-0142). New bookings
 are appended to it. Point `BOOKINGS_FILE` elsewhere to keep the repo copy clean.
@@ -129,12 +136,13 @@ swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
 swaig-test app.py --dump-swml --raw --query-params '{"booking": "AC-1001"}' | jq '.sections.main[-1].ai.global_data'
 swaig-test app.py --custom-data '{"global_data": {"caller": "+15550177"}}' \
   --exec book_appointment --name Sam --date 2026-11-04 --time 11:00
-curl -s localhost:3000/sms -d From=%2B15550142 -d To=%2B15550100 -d Body=thanks
 ```
 
+A bare `curl` to `/sms` gets 403 because it isn't signed (the tests sign theirs).
+
 Open slots: 2026-11-03 at 09:00 (taken by `AC-1001`), 10:30, 14:00; 2026-11-04 at 09:00,
-11:00, 15:30; 2026-11-05 at 10:00, 13:00. A `curl` with `Body=change` places a real call to
-+1 555-0142, so use your own phone in `data/bookings.json` for that.
+11:00, 15:30; 2026-11-05 at 10:00, 13:00. Texting CHANGE from the booking's phone places a
+real call back, so put your own phone in `data/bookings.json` for that.
 
 ## Deploy
 
@@ -149,6 +157,7 @@ booking store is a local JSON file. Swap `load_bookings()`/`save_bookings()` for
 ## What to change first
 
 Open `config.py`: edit `SMS_TEMPLATE` (the confirmation text; keep `{date}`, `{time}` and
-`{confirmation}`) and `ESCALATE_WORDS` (which replies trigger the call back). Then point
+`{confirmation}`), `ESCALATE_WORDS` (which replies trigger the call back) and
+`DIAL_BACK_COOLDOWN_MINUTES`. The cooldown is in memory, per process. Then point
 `SLOTS_FILE` and `BOOKINGS_FILE` at your own calendar, or replace the store functions at the
 top of `app.py`.
