@@ -50,7 +50,10 @@ SWAIG:
       parameters:
         type: object
         properties:
-          tracking_number: {type: string, description: "The tracking number, digits only, no spaces or dashes"}
+          tracking_number:
+            type: string
+            description: "The caller's tracking number, digits only, no spaces or dashes. Ask the caller if they don't provide it."
+            pattern: "^[0-9]+$"
         required: [tracking_number]
       data_map:
         webhooks:

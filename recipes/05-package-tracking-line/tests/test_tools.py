@@ -23,7 +23,7 @@ RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
 
 import config  # noqa: E402
-from app import TrackingAgent, build_track_package  # noqa: E402
+from app import TrackingAgent, build_track_package, track_package_function  # noqa: E402
 from signalwire.cli.execution.datamap_exec import execute_datamap_function  # noqa: E402
 
 MOCK_DIR = RECIPE / "data" / "mock-api"
@@ -76,14 +76,14 @@ def feed_url():
 def run_datamap(monkeypatch, feed_url, number):
     monkeypatch.setenv("SWML_ALLOW_PRIVATE_URLS", "true")   # the simulator blocks localhost otherwise
     monkeypatch.setattr(config, "TRACKING_URL", feed_url)
-    return execute_datamap_function(build_track_package().to_swaig_function(),
+    return execute_datamap_function(track_package_function(),
                                     {"tracking_number": number})["response"]
 
 
 # --- the DataMap definition ---------------------------------------------------
 
 def test_datamap_matches_golden_file():
-    assert build_track_package().to_swaig_function() == json.loads(GOLDEN.read_text())
+    assert track_package_function() == json.loads(GOLDEN.read_text())
 
 
 def test_default_url_is_the_public_mock_feed():
@@ -146,6 +146,16 @@ def test_governance_track_package_ships_as_data_map_with_no_webhook(swml):
     assert fn["function"] == "track_package"
     assert "data_map" in fn
     assert "web_hook_url" not in fn       # the platform calls the carrier, not this app
+
+
+def test_governance_track_package_schema_is_typed_and_asks(swml):
+    (fn,) = ai_of(swml)["SWAIG"]["functions"]
+    props = fn["parameters"]["properties"]
+    assert props["tracking_number"]["pattern"] == "^[0-9]+$"   # digits only, as the URL template needs
+    assert set(fn["parameters"]["required"]) == set(props)
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
+    assert fn == json.loads(GOLDEN.read_text())                # what ships is what the golden file pins
 
 
 def test_governance_no_python_handler_exists():
