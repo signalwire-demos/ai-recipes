@@ -14,12 +14,18 @@ from signalwire import AgentBase, FunctionResult
 
 import config
 
-SLOT_ID = {"type": "string", "description": "Slot id from find_slots, e.g. S-0101"}
+SLOT_ID = {"type": "string", "pattern": "^S-[0-9]{4}$",
+           "description": "Slot id exactly as find_slots returned it, e.g. S-0101, for the slot the "
+                          "caller chose. Ask which slot they want if not provided."}
 CONSENT_ANSWERS = {"yes": True, "no": False}  # record_consent answer -> consent granted
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
 def load_slots() -> list[dict]:
     return json.loads(config.SLOTS_FILE.read_text())
+
+
+DAYS = [d for d in WEEKDAYS if d in {s["day"] for s in load_slots()}]  # find_slots enum, from the slot file
 
 
 def now_iso() -> str:
@@ -57,15 +63,18 @@ class MedicalAppointmentAgent(AgentBase):
         ctx.add_step("schedule") \
             .set_text(
                 "This call is recorded with consent. Ask which day suits the caller, call "
-                "find_slots, offer the options, and call book_slot for the one they choose."
+                "find_slots, offer the options, and call book_slot for the one they choose. "
+                "Never pick a day or a slot the caller did not choose."
             ) \
             .set_functions(["find_slots", "book_slot"]) \
             .set_valid_steps([])
         ctx.add_step("schedule_limited") \
             .set_text(
                 "The caller declined recording, so this call is not recorded and you cannot "
-                "confirm a booking. Call find_slots, and call hold_slot for the one they want. "
-                "Explain that the front desk will call back to confirm the hold."
+                "confirm a booking. Ask which day suits the caller, call find_slots, offer the "
+                "options, and call hold_slot for the one they choose. Never pick a day or a slot "
+                "the caller did not choose. Explain that the front desk will call back to confirm "
+                "the hold."
             ) \
             .set_functions(["find_slots", "hold_slot"]) \
             .set_valid_steps([])
@@ -83,7 +92,8 @@ class MedicalAppointmentAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {"answer": {"type": "string", "enum": list(CONSENT_ANSWERS),
-                                      "description": "yes = agreed to recording, no = declined"}},
+                                      "description": "yes = the caller agreed to recording, no = the "
+                                                     "caller declined. Ask if not provided."}},
             "required": ["answer"],
         },
     )
@@ -114,7 +124,9 @@ class MedicalAppointmentAgent(AgentBase):
         description="List open appointment slots, optionally for one day of the week.",
         parameters={
             "type": "object",
-            "properties": {"day": {"type": "string", "description": "Day of the week, e.g. Tuesday"}},
+            "properties": {"day": {"type": "string", "enum": DAYS,
+                                   "description": "Day of the week the caller asked for, e.g. Tuesday. "
+                                                  "Ask which day suits them; omit to list every open slot."}},
         },
     )
     def find_slots(self, args, raw_data):
@@ -129,7 +141,10 @@ class MedicalAppointmentAgent(AgentBase):
         return FunctionResult(f"Open slots: {lines}.")
 
     def _claim(self, args, status: str):
-        slot = self.slots.get(str(args.get("slot_id", "")).strip().upper())
+        slot_id = str(args.get("slot_id") or "").strip().upper()
+        if not slot_id:
+            return None, FunctionResult("I need the slot id from find_slots. Ask which slot the caller wants.")
+        slot = self.slots.get(slot_id)
         if not slot or slot["id"] in self.taken:
             return None, FunctionResult("That slot isn't available. Call find_slots again.")
         self.taken.add(slot["id"])

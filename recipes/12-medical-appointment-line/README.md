@@ -89,7 +89,7 @@ pytest -q
 swaig-test app.py --list-tools
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
 swaig-test app.py --exec record_consent --answer yes
-swaig-test app.py --exec find_slots --day monday
+swaig-test app.py --exec find_slots --day Monday
 ```
 
 ### Live test
