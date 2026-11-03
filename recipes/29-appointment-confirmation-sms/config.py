@@ -24,6 +24,12 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+# .env.example ships SWML_BASIC_AUTH_PASSWORD=change-me. Anyone who has read this repo knows it,
+# and it guards the SWML, every tool and every route here, so never serve with it.
+if os.environ.get("SWML_BASIC_AUTH_PASSWORD", "").strip() == "change-me":
+    raise SystemExit("SWML_BASIC_AUTH_PASSWORD is still the .env.example placeholder: "
+                     "set a long random value (python -c 'import secrets; print(secrets.token_urlsafe(24))').")
+
 # The SDK builds its webhook URLs from SWML_PROXY_URL_BASE. Recipes use PUBLIC_URL.
 if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
     os.environ["SWML_PROXY_URL_BASE"] = os.environ["PUBLIC_URL"].rstrip("/")
@@ -49,7 +55,10 @@ CONFIRMATION_PREFIX = "AC-"
 SMS_FROM = os.environ.get("SMS_FROM") or os.environ.get("SMS_1", "")         # 10DLC-registered sender
 DIAL_FROM = os.environ.get("DIAL_FROM") or os.environ.get("OUTBOUND_1", "")  # caller ID for the call back
 
-# Optional: the Space's Signing Key. When set, /sms rejects unsigned requests.
+# An inbound text containing one triggers at most one call back per booking in this window.
+DIAL_BACK_COOLDOWN_MINUTES = float(os.environ.get("DIAL_BACK_COOLDOWN_MINUTES") or 10)
+
+# Required: the Space's Signing Key. Without it /sms answers 403 to every request.
 SIGNING_KEY = os.environ.get("SIGNALWIRE_SIGNING_KEY", "")
 
 # --- Server ---------------------------------------------------------------
