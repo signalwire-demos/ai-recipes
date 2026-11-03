@@ -98,6 +98,22 @@ def test_new_yaml_is_picked_up_without_restart(monkeypatch, tmp_path):
     assert app.resolve_tenant({}, {"call": {"to": "+15550114"}})["id"] == "spa"
 
 
+def test_env_vars_expand_only_in_numbers_and_transfer_targets(monkeypatch, tmp_path):
+    """A tenant prompt that names a secret env var must not get the secret's value."""
+    monkeypatch.setenv("SIGNALWIRE_API_TOKEN", "PT-secret-not-real")
+    text = (config.TENANTS_DIR / "law.yaml").read_text().replace(
+        "prompt: >-\n", "prompt: >-\n  Token ${SIGNALWIRE_API_TOKEN} and $SIGNALWIRE_API_TOKEN.\n")
+    (tmp_path / "law.yaml").write_text(text)
+    monkeypatch.setattr(config, "TENANTS_DIR", tmp_path)
+    cfg = app.load_tenants()["law"]
+    assert "PT-secret-not-real" not in json.dumps(cfg)
+    assert "${SIGNALWIRE_API_TOKEN}" in cfg["prompt"]
+    assert cfg["numbers"] == ["+15550113"] and cfg["transfer_targets"] == {"intake_desk": ""}
+    _, ai = tool_names(per_call({"tenant": "law"}))
+    assert "PT-secret-not-real" not in json.dumps(ai)
+    assert "${SIGNALWIRE_API_TOKEN}" in json.dumps(ai["prompt"])  # the prompt the model reads stays literal
+
+
 # --- handlers -------------------------------------------------------------
 
 def test_check_hours():

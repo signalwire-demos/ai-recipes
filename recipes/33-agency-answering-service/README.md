@@ -114,7 +114,9 @@ Tenant files are read on each request, so adding a client is copying a YAML file
 
 The tenant YAML schema is the thing to make yours: copy `tenants/dental.yaml` to
 `tenants/<id>.yaml` (the file name must equal `id`), set `numbers`, `name`, `voice`, `timezone`,
-`hours`, `prompt`, `tools` (names from `TOOLS` in `app.py`) and `transfer_targets`. Then open
+`hours`, `prompt`, `tools` (names from `TOOLS` in `app.py`) and `transfer_targets`. `${VAR}`
+expands only inside `numbers` and `transfer_targets`; anywhere else (a prompt, say) it stays
+literal, so a tenant file can't pull a secret like `SIGNALWIRE_API_TOKEN` into the SWML. Then open
 `config.py`: `DEFAULT_TENANT` decides what an unknown caller gets, `ALLOW_TENANT_QUERY=False`
 turns off `?tenant=` routing in production, and `MESSAGES_FILE` is where messages go. A new
 kind of tool is one entry in `TOOLS`; it reaches only the tenants that list it.

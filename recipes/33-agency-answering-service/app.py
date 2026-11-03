@@ -27,12 +27,22 @@ def digits(value) -> str:
     return "".join(c for c in str(value or "") if c.isdigit())
 
 
+def expand_numbers(cfg: dict) -> dict:
+    """${VAR} expands only in numbers and transfer_targets. Expanding the whole file would let a
+    tenant YAML pull any env var (an API token, say) into its prompt."""
+    cfg["numbers"] = [os.path.expandvars(str(n)) for n in cfg.get("numbers") or []]
+    cfg["transfer_targets"] = {k: os.path.expandvars(str(v or ""))
+                               for k, v in (cfg.get("transfer_targets") or {}).items()}
+    return cfg
+
+
 def load_tenants() -> dict:
     """Read every tenants/*.yaml now, so a new file takes effect on the next call."""
     tenants = {}
     for path in sorted(config.TENANTS_DIR.glob("*.yaml")):
-        cfg = yaml.safe_load(os.path.expandvars(path.read_text()))
-        if cfg and cfg.get("id") == path.stem:
+        cfg = yaml.safe_load(path.read_text())
+        if isinstance(cfg, dict) and cfg.get("id") == path.stem:
+            cfg = expand_numbers(cfg)
             tenants[cfg["id"]] = cfg
     return tenants
 
