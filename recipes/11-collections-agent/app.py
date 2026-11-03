@@ -54,10 +54,11 @@ class CollectionsAgent(AgentBase):
         ctx.add_step("negotiate") \
             .set_text(
                 "You are speaking with ${global_data.account.name} about a balance of "
-                "${global_data.account.balance_text} owed to ${global_data.account.creditor}. Ask what "
-                "they can pay each month and for how many months, then call propose_plan. If they "
-                "won't commit to any plan, call decline_plan. If they are abusive or ask for a "
-                "person, call escalate."
+                "${global_data.account.balance_text} owed to ${global_data.account.creditor}. Ask, one "
+                "at a time, what they can pay each month and for how many months, then call "
+                "propose_plan with exactly what they said. Never fill in a value the caller did not "
+                "give, and never work one out from the balance. If they won't commit to any plan, "
+                "call decline_plan. If they are abusive or ask for a person, call escalate."
             ) \
             .set_functions(["propose_plan", "decline_plan", "escalate"]) \
             .set_valid_steps([])  # only handlers leave this step
@@ -79,8 +80,12 @@ class CollectionsAgent(AgentBase):
         name="find_account",
         description="Look up the caller's account by reference number and ZIP code.",
         parameters={"type": "object", "properties": {
-            "reference": {"type": "string", "description": "Reference number from the letter"},
-            "postal_code": {"type": "string", "description": "Five-digit ZIP code"},
+            "reference": {"type": "string",
+                          "description": "Reference number printed on the caller's letter: two letters "
+                                         "then five digits, e.g. CA20417. Ask if not provided."},
+            "postal_code": {"type": "string", "pattern": "^[0-9]{5}$",
+                            "description": "Caller's five-digit ZIP code as printed on the letter. "
+                                           "Ask if not provided."},
         }, "required": ["reference", "postal_code"]},
     )
     def find_account(self, args, raw_data):
@@ -99,8 +104,12 @@ class CollectionsAgent(AgentBase):
         name="propose_plan",
         description="Submit the payment plan the caller is offering.",
         parameters={"type": "object", "properties": {
-            "monthly_amount": {"type": "number", "description": "Dollars per month the caller offers"},
-            "months": {"type": "integer", "description": "Number of monthly payments"},
+            "monthly_amount": {"type": "number",
+                               "description": "Dollars per month the caller says they can pay, "
+                                              "e.g. 125 or 62.50. Ask if not provided."},
+            "months": {"type": "integer",
+                       "description": "Number of monthly payments the caller is offering. Ask if not "
+                                      "provided; never compute it from the balance."},
         }, "required": ["monthly_amount", "months"]},
     )
     def propose_plan(self, args, raw_data):
@@ -154,7 +163,9 @@ class CollectionsAgent(AgentBase):
         name="escalate",
         description="Hand the call to a person: the caller asked for one, or is being abusive.",
         parameters={"type": "object", "properties": {
-            "reason": {"type": "string", "enum": ["requested_person", "abuse"]},
+            "reason": {"type": "string", "enum": ["requested_person", "abuse"],
+                       "description": "requested_person = the caller asked for a human; "
+                                      "abuse = the caller is abusive or threatening"},
         }, "required": ["reason"]},
     )
     def escalate(self, args, raw_data):

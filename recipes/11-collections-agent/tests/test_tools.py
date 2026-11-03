@@ -223,3 +223,21 @@ def test_leak_detector_catches_each_threshold():
     assert policy_leaks("minimum is $75.00 a month")
     assert policy_leaks("no longer than 18 months") and policy_leaks("after three tries")
     assert policy_leaks("first one due in 30 days, balance $1,240.00") == []
+
+
+def test_governance_caller_values_are_typed_and_asked_for(ai):
+    """Audit 2026-11-03: with the balance in the step text and no instruction to ask, the model could
+    compute months from balance / amount instead of asking; escalate.reason had no description."""
+    fns = {f["function"]: f for f in ai["SWAIG"]["functions"]}
+    for name in ("find_account", "propose_plan"):
+        props = fns[name]["parameters"]["properties"]
+        assert set(fns[name]["parameters"]["required"]) == set(props), name
+        for param, prop in props.items():
+            assert "ask" in prop["description"].lower(), f"{name}.{param}: the description must tell the model to ask"
+    zip_pattern = fns["find_account"]["parameters"]["properties"]["postal_code"]["pattern"]
+    assert re.fullmatch(zip_pattern, "74101") and not re.fullmatch(zip_pattern, "7410")
+    assert "never compute" in fns["propose_plan"]["parameters"]["properties"]["months"]["description"]
+    reason = fns["escalate"]["parameters"]["properties"]["reason"]
+    assert reason["enum"] == ["requested_person", "abuse"]
+    assert "requested_person" in reason["description"] and "abuse" in reason["description"]
+    assert "Never fill in a value the caller did not give" in steps_of(ai)["negotiate"]["text"]
