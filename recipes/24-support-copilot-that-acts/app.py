@@ -75,7 +75,9 @@ class SupportCopilot(SWMLService):
         super().__init__(name="support-copilot", route="/", port=config.PORT, **kwargs)
         self.feed = Feed(config.FEED_SIZE)
         self.ledger_lock = threading.Lock()
-        order_id = {"order_id": {"type": "string", "description": "Order number, e.g. A-1001"}}
+        order_id = {"order_id": {"type": "string", "description": (
+            "Order number as heard, e.g. A-1001. Pass the digits as spoken (A 1002, 81002 and a1002 all resolve); "
+            "never write digits as words and never guess an order number that was not said on the call.")}}
         # secure=False: the sidecar has no per-call token; basic auth in web_hook_url guards /swaig.
         self.define_tool(name="lookup_order", description="Look up an order's status, items and total.",
                          parameters=order_id, required=["order_id"], handler=self.lookup_order, secure=False)
@@ -83,8 +85,12 @@ class SupportCopilot(SWMLService):
             name="issue_credit",
             description="Issue a credit on an order after the rep has offered it to the customer.",
             parameters={**order_id,
-                        "amount": {"type": "number", "description": f"Credit amount in {config.CURRENCY}, as the rep stated it"},
-                        "reason": {"type": "string", "description": "Short reason for the credit"}},
+                        "amount": {"type": "number", "description": (
+                            f"Credit amount in {config.CURRENCY}, the exact dollar figure the rep said aloud. "
+                            "Never compute, convert or choose an amount yourself.")},
+                        "reason": {"type": "string", "description": (
+                            "Short reason for the credit, a few words taken from what the customer and rep said, "
+                            "e.g. 'arrived scratched'.")}},
             required=["order_id", "amount", "reason"], handler=self.issue_credit, secure=False)
 
         self.add_verb("answer", {})
@@ -154,6 +160,9 @@ class SupportCopilot(SWMLService):
             amount = 0.0
         card = {"kind": "credit", "order_id": order_id, "amount": amount, "currency": config.CURRENCY,
                 "reason": reason, "call_id": call_id}
+        if not reason:   # required in the schema, but runtime validation is soft: the handler enforces it
+            self.feed.push({**card, "status": "refused", "detail": "No reason given."})
+            return FunctionResult(REFUSED)
         with self.ledger_lock:   # check and write under one lock: no double credit from parallel calls
             refusal = self.credit_refusal(order_id, amount)
             if refusal:

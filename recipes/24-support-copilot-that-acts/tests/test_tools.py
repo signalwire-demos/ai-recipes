@@ -128,6 +128,16 @@ def test_refusals_never_tell_the_model_the_cap(svc):
     assert f"{CAP:.2f}" not in REFUSED and str(int(CAP)) not in REFUSED
 
 
+@pytest.mark.parametrize("args", [{"order_id": "A-1001", "amount": 10},
+                                  {"order_id": "A-1001", "amount": 10, "reason": "   "}])
+def test_credit_without_a_reason_is_refused_and_writes_nothing(svc, ledger, args):
+    """reason is required in the schema; runtime validation is soft, so the handler enforces it too."""
+    result = svc.issue_credit(args, {"call_id": "c1"}).to_dict()
+    assert result["response"] == REFUSED and not result.get("action")
+    assert last_card(svc)["status"] == "refused" and last_card(svc)["detail"] == "No reason given."
+    assert not ledger.exists()
+
+
 # --- sidecar events and the rep page -----------------------------------------
 
 def event(kind, **fields):
@@ -189,3 +199,19 @@ def test_governance_cap_is_not_in_anything_the_model_reads(swml):
     model_visible = json.dumps({"prompt": side["prompt"], "functions": side["SWAIG"]["functions"]})
     assert f"{CAP:.2f}" not in model_visible and f"{CAP:g}" not in model_visible
     assert "cap" not in model_visible.lower()
+
+
+def test_governance_tool_schemas_say_pass_what_was_heard(swml):
+    """The sidecar can't ask: every parameter is required and says to pass what was said, never a guess."""
+    side = sidecar_of(swml)
+    fns = {f["function"]: f for f in side["SWAIG"]["functions"]}
+    for fn in fns.values():
+        assert set(fn["parameters"]["required"]) == set(fn["parameters"]["properties"])
+    props = fns["issue_credit"]["parameters"]["properties"]
+    assert fns["lookup_order"]["parameters"]["properties"]["order_id"] == props["order_id"]
+    assert props["order_id"]["description"].startswith("Order number as heard")
+    assert "never guess an order number" in props["order_id"]["description"]
+    assert props["amount"]["type"] == "number" and "exact dollar figure the rep said" in props["amount"]["description"]
+    assert "Never compute, convert or choose" in props["amount"]["description"]
+    assert "e.g. 'arrived scratched'" in props["reason"]["description"]
+    assert "without a dollar amount, or as a percentage, do not call issue_credit" in side["prompt"]
