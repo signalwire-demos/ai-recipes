@@ -26,6 +26,10 @@ def sweep(client) -> list[str]:
     """Dial every pending callback once. Returns the record ids dialed."""
     dialed = []
     for rec in store.pending():
+        if not store.dialable(rec["number"]):  # checked again here, whoever wrote the record
+            store.update(rec["id"], status="refused")
+            print(f"{rec['id']}: refused, number not allowed")
+            continue
         try:
             call = client.calling.dial(from_=config.FROM_NUMBER, to=rec["number"],
                                        url=callback_url(rec["id"]))
