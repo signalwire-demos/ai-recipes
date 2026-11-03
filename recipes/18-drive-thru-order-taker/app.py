@@ -12,14 +12,44 @@ from signalwire import AgentBase, FunctionResult
 import config
 from rules import check_line, key_of, label, load, money, substitutes, totals, unit_cents
 
-LINE = {"type": "integer", "description": "Order line number, starting at 1"}
+# The menu is loaded once here so every enum below comes from the same data check_line uses.
+MENU = load(config.MENU_FILE)
+SIZES = sorted({s for v in MENU.values() for s in v["sizes"]})
+MODIFIERS = sorted({m for v in MENU.values() for m in v["modifiers"]})
+SIDES = sorted({s for v in MENU.values() for s in v.get("combo", {}).get("side", [])})
+DRINKS = sorted({d for v in MENU.values() for d in v.get("combo", {}).get("drink", [])})
+
+LINE = {"type": "integer", "description": "Order line number from the add_item result, starting at 1"}
 ITEM_PARAMS = {
-    "item": {"type": "string", "description": "Menu item id, e.g. cheeseburger"},
-    "size": {"type": "string", "description": "Size, e.g. large. Omit if the item has one size"},
-    "quantity": {"type": "integer", "description": "How many. Default 1"},
-    "modifiers": {"type": "array", "items": {"type": "string"}, "description": "e.g. [\"no onions\"]"},
-    "side": {"type": "string", "description": "Combos only: the side item id"},
-    "drink": {"type": "string", "description": "Combos only: the drink item id"},
+    "item": {"type": "string", "enum": list(MENU),
+             "description": "Menu item id the caller asked for, e.g. cheeseburger. Ask if not provided."},
+    "size": {"type": "string", "enum": SIZES,
+             "description": "Size the caller asked for, one of the sizes listed for that item, e.g. large. "
+                            "Ask if the item has more than one size and the caller did not say one; never "
+                            "assume. Omit only for one-size items."},
+    "quantity": {"type": "integer",
+                 "description": "How many the caller asked for, e.g. 2. Omit for one. Ask if unclear."},
+    "modifiers": {"type": "array", "items": {"type": "string", "enum": MODIFIERS},
+                  "description": "Changes the caller asked for, from the modifier names listed for that "
+                                 "item, e.g. [\"no onions\"]. Only what the caller said; omit if none."},
+    "side": {"type": "string", "enum": SIDES,
+             "description": "Combos only: the side the caller chose, one of the listed combo sides. "
+                            "Ask if not said; never assume."},
+    "drink": {"type": "string", "enum": DRINKS,
+              "description": "Combos only: the drink the caller chose, one of the listed combo drinks. "
+                             "Ask if not said; never assume."},
+}
+CHANGE_PARAMS = {   # modify_item: a field left out keeps the line's current value
+    "line": LINE,
+    "size": {"type": "string", "enum": SIZES,
+             "description": "New size the caller asked for, one of the sizes listed for that item. "
+                            "Omit to keep the current size."},
+    "quantity": {"type": "integer",
+                 "description": "New quantity the caller asked for. Omit to keep the current quantity."},
+    "add_modifiers": {"type": "array", "items": {"type": "string", "enum": MODIFIERS},
+                      "description": "Modifiers the caller asked to add, from the item's listed names. Omit if none."},
+    "remove_modifiers": {"type": "array", "items": {"type": "string", "enum": MODIFIERS},
+                         "description": "Modifiers the caller asked to take off the line. Omit if none."},
 }
 NO_PARAMS = {"type": "object", "properties": {}}
 
@@ -31,7 +61,7 @@ def order_of(raw_data) -> list:
 class DriveThruAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="drive-thru", route=config.ROUTE, port=config.PORT, **kwargs)
-        self.menu = load(config.MENU_FILE)
+        self.menu = MENU
         self.add_language("English", config.LANGUAGE_CODE, config.VOICE)
         self.prompt_add_section(
             "Role",
@@ -47,8 +77,11 @@ class DriveThruAgent(AgentBase):
 
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("take_order") \
-            .set_text("Take the order. Call add_item for each item. Use modify_item or remove_item to "
-                      "change a line. When the caller says that's everything, call finish_order.") \
+            .set_text("Take the order one item at a time. Before calling add_item, ask for anything the "
+                      "caller has not said: the size when the item has more than one, and the side and "
+                      "drink for a combo. Never fill in a size, side or drink the caller did not give. "
+                      "Use modify_item or remove_item to change a line. When the caller says that's "
+                      "everything, call finish_order.") \
             .set_functions(["add_item", "modify_item", "remove_item", "finish_order"]) \
             .set_valid_steps([])
         ctx.add_step("substitute_offer") \
@@ -102,10 +135,9 @@ class DriveThruAgent(AgentBase):
     def add_item(self, args, raw_data):
         return self._place(args, raw_data)
 
-    @AgentBase.tool(name="modify_item", description="Change the size, quantity or modifiers of a line.",
-                    parameters={"type": "object", "required": ["line"], "properties": {
-                        "line": LINE, "size": ITEM_PARAMS["size"], "quantity": ITEM_PARAMS["quantity"],
-                        "add_modifiers": ITEM_PARAMS["modifiers"], "remove_modifiers": ITEM_PARAMS["modifiers"]}})
+    @AgentBase.tool(name="modify_item", description="Change the size, quantity or modifiers of a line. "
+                    "A field left out keeps its current value.",
+                    parameters={"type": "object", "properties": CHANGE_PARAMS, "required": ["line"]})
     def modify_item(self, args, raw_data):
         order, idx = order_of(raw_data), int(args.get("line") or 0) - 1
         if not 0 <= idx < len(order):
@@ -137,8 +169,10 @@ class DriveThruAgent(AgentBase):
 
     # --- substitute_offer ---------------------------------------------------------------
     @AgentBase.tool(name="accept_substitute", description="The caller picked one of the offered substitutes.",
-                    parameters={"type": "object", "required": ["choice"],
-                                "properties": {"choice": {"type": "string", "description": "Substitute id"}}})
+                    parameters={"type": "object", "required": ["choice"], "properties": {"choice": {
+                        "type": "string", "description": "The substitute the caller picked: exactly one of the "
+                        "options just offered (global_data.pending.options), e.g. fries. Ask which one if they "
+                        "did not say."}}})
     def accept_substitute(self, args, raw_data):
         pending = (raw_data.get("global_data") or {}).get("pending") or {}
         options = pending.get("options", [])

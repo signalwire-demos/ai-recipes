@@ -16,7 +16,9 @@ gives an order number.
 
 The menu, the stock and the money are enforced in code, not in the prompt. Every line goes
 through one rule (`rules.check_line`): unknown items, wrong sizes, invalid modifiers, bad combo
-picks and silly quantities never reach the order. A stock-out makes the handler jump the call to
+picks and silly quantities never reach the order. The tool schemas say the same thing to the
+model: item, size, side, drink and modifier are enums built from `data/menu.json`, and every
+description tells it to ask rather than assume. A stock-out makes the handler jump the call to
 `substitute_offer`, where the only two tools are `accept_substitute` (which accepts only an
 option the handler put in `global_data.pending`) and `decline_substitute`. The model never sees
 a price list and never adds anything up: `finish_order` computes the total in integer cents with
