@@ -120,6 +120,14 @@ def test_missing_details_are_asked_for(agent):
     assert "callback_number" in result.to_dict()["response"]
 
 
+def test_short_callback_number_is_asked_for_again(agent):
+    """Audit 2026-11-03: a junk number was texted to the owner verbatim. Fewer than 7 digits is
+    sent back with no SMS, no connect and no step change."""
+    result = agent.submit_call({**DETAILS, "callback_number": "555", "message": "Quote for a faucet"}, {})
+    assert acts(result) == []
+    assert "callback_number" in result.to_dict()["response"]
+
+
 # --- governance: read the SWML exactly as swaig-test dumps it ----------------------
 
 def dump(hours: str, tmp_path) -> dict:
@@ -148,3 +156,17 @@ def test_governance_after_hours_model_cannot_route(tmp_path):
     steps = {s["name"]: s for s in ai["prompt"]["contexts"]["default"]["steps"]}
     assert steps["intake"]["functions"] == ["submit_call"] and steps["intake"]["valid_steps"] == []
     assert steps["wrap_up"]["functions"] == []
+
+
+def test_governance_submit_call_schema_is_typed_and_asks(tmp_path):
+    doc = dump("mon 00:00-00:00", tmp_path)              # never open
+    ai = next(v["ai"] for v in doc["sections"]["main"] if "ai" in v)
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "submit_call")
+    props = fn["parameters"]["properties"]
+    assert props["callback_number"]["pattern"] == "^\\+?[0-9]{7,15}$"
+    assert set(fn["parameters"]["required"]) == set(props)
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
+    assert "verbatim" in props["message"]["description"]    # is_urgent() matches the caller's words
+    steps = {s["name"]: s for s in ai["prompt"]["contexts"]["default"]["steps"]}
+    assert "one at a time" in steps["intake"]["text"]

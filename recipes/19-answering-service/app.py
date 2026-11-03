@@ -69,9 +69,9 @@ class AnsweringService(AgentBase):
         )
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("intake") \
-            .set_text("Say the office is closed. Ask for the caller's name, a callback number, and "
-                      "what the call is about. Put the caller's own words in `message`. Then call "
-                      "submit_call.") \
+            .set_text("Say the office is closed. Ask for, one at a time: the caller's name, a callback "
+                      "number, and what the call is about. Put the caller's own words in `message`. "
+                      "Never fill in a value the caller did not give. Then call submit_call.") \
             .set_functions(["submit_call"]) \
             .set_valid_steps([])
         ctx.add_step("wrap_up") \
@@ -99,15 +99,23 @@ class AnsweringService(AgentBase):
         name="submit_call",
         description="Submit the caller's details once you have their name, number and reason.",
         parameters={"type": "object", "required": ["name", "callback_number", "message"], "properties": {
-            "name": {"type": "string", "description": "Caller's name"},
-            "callback_number": {"type": "string", "description": "Number to call back, digits only"},
-            "message": {"type": "string", "description": "What the call is about, in the caller's words"},
+            "name": {"type": "string", "description": "The caller's name, as they said it. Ask if not provided."},
+            "callback_number": {"type": "string", "pattern": "^\\+?[0-9]{7,15}$",
+                                "description": "Phone number to call the caller back, digits only, e.g. "
+                                               "5551234567. Ask the caller for it; never assume it is the "
+                                               "number they called from."},
+            "message": {"type": "string",
+                        "description": "What the call is about, verbatim in the caller's own words; do not "
+                                       "summarize or reword, the urgency check matches their words. Ask if "
+                                       "not provided."},
         }},
     )
     def submit_call(self, args, raw_data):
         missing = [k for k in ("name", "callback_number", "message") if not str(args.get(k) or "").strip()]
         if missing:
             return FunctionResult(f"Still need: {', '.join(missing)}. Ask for it.")
+        if len(re.sub(r"\D", "", str(args["callback_number"]))) < 7:   # the pattern is advisory; code checks
+            return FunctionResult("That callback_number doesn't look complete. Ask for it again.")
         if is_urgent(args["message"]):
             return self.forward_urgent(args)
         return self.take_message(args, raw_data)
