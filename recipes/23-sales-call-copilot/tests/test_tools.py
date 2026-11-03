@@ -30,14 +30,20 @@ def svc():
     return SalesCopilot()
 
 
+REP = ("rep", "rep-only-secret")
+
+
 @pytest.fixture
-def client(svc):
-    return TestClient(build_app(svc)), svc.get_basic_auth_credentials()
+def client(svc, monkeypatch):
+    """(http, rep login, platform login). The rep's login is not the platform's."""
+    monkeypatch.setattr(config, "REP_USER", REP[0])
+    monkeypatch.setattr(config, "REP_PASSWORD", REP[1])
+    return TestClient(build_app(svc)), REP, svc.get_basic_auth_credentials()
 
 
 def stream(client):
-    http, auth = client
-    text = http.get("/rep/stream?once=1", auth=auth).text
+    http, rep, _ = client
+    text = http.get("/rep/stream?once=1", auth=rep).text
     return [json.loads(line[6:]) for line in text.splitlines() if line.startswith("data: ")]
 
 
@@ -125,29 +131,50 @@ def test_unknown_or_top_level_events_are_ignored(svc):
 # --- rep page and card stream -----------------------------------------------
 
 def test_rep_page_and_events_need_basic_auth(client):
-    http, auth = client
+    http, rep, platform = client
     assert http.get("/rep/").status_code == 401
     assert http.post("/events", json={}).status_code == 401
-    page = http.get("/rep/", auth=auth)
+    page = http.get("/rep/", auth=rep)
     assert page.status_code == 200 and 'src="rep.js"' in page.text
-    assert "new EventSource(\"stream\")" in http.get("/rep/rep.js", auth=auth).text
+    assert "new EventSource(\"stream\")" in http.get("/rep/rep.js", auth=rep).text
+    assert http.post("/events", auth=platform, json={}).status_code == 200
+
+
+def test_rep_login_cannot_call_tools_or_post_events(client):
+    # Exploit: a rep replays the sidecar's tool call by hand. The rep login opens /rep only.
+    http, rep, platform = client
+    call = {"function": "flag_objection", "call_id": "c1", "argument": {"parsed": [{"customer_quote": "too expensive"}]}}
+    assert http.post("/swaig", auth=rep, json=call).status_code == 401
+    assert http.post("/events", auth=rep, json=event("insight", raw="fake")).status_code == 401
+    assert http.post("/", auth=rep).status_code == 401
+    assert http.get("/rep/", auth=platform).status_code == 401    # and reps don't need the platform's
+    assert stream(client) == []
+
+
+def test_rep_page_is_locked_without_its_own_password(svc, monkeypatch):
+    monkeypatch.setattr(config, "REP_PASSWORD", "")
+    assert TestClient(build_app(svc)).get("/rep/", auth=("rep", "")).status_code == 401
+    user, password = svc.get_basic_auth_credentials()   # reusing the platform login is refused too
+    monkeypatch.setattr(config, "REP_USER", user)
+    monkeypatch.setattr(config, "REP_PASSWORD", password)
+    assert TestClient(build_app(svc)).get("/rep/", auth=(user, password)).status_code == 401
 
 
 def test_card_stream_renders_events_in_order(client):
-    http, auth = client
-    http.post("/events", auth=auth, json=event("insight", raw="Mirror their words."))
-    http.post("/swaig", auth=auth, json={"function": "flag_objection", "call_id": "call-1",
+    http, rep, platform = client
+    http.post("/events", auth=platform, json=event("insight", raw="Mirror their words."))
+    http.post("/swaig", auth=platform, json={"function": "flag_objection", "call_id": "call-1",
                                           "argument": {"parsed": [{"customer_quote": "not right now"}]}})
     cards = stream(client)
     assert [c["kind"] for c in cards] == ["insight", "objection"]
     assert cards[1]["category"] == "timing" and [c["id"] for c in cards] == [1, 2]
-    assert http.get("/rep/stream?once=1", auth=auth, headers={"Last-Event-ID": "1"}).text.count("data: ") == 1
+    assert http.get("/rep/stream?once=1", auth=rep, headers={"Last-Event-ID": "1"}).text.count("data: ") == 1
 
 
 def test_swml_is_served_behind_auth(client):
-    http, auth = client
+    http, _, platform = client
     assert http.post("/").status_code == 401
-    assert "ai_sidecar" in http.post("/", auth=auth).text
+    assert "ai_sidecar" in http.post("/", auth=platform).text
 
 
 # --- governance: read the SWML exactly as swaig-test dumps it ---------------
