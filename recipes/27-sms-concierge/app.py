@@ -10,6 +10,9 @@ Two inbound payloads are accepted at /sms:
   messaging (the route in the AI chat docs). The reply is messaging SWML {"reply": ...}.
 - A form-encoded laml_webhooks POST (From, To, Body, MessageSid). The reply is cXML <Message>.
 Texts from our own SMS number (or a number texting itself) get no reply, so replies can't loop.
+Every /sms request must carry a valid X-SignalWire-Signature. With no SIGNALWIRE_SIGNING_KEY
+set, /sms answers 403: the conversation id is just the sender's digits, so an unsigned POST
+with a forged From would resume that guest's verified conversation.
 TODO(blocked: needs live verification) A handset texting the number is untested. See the README.
 """
 import json
@@ -66,6 +69,8 @@ class SmsConcierge(HotelConcierge):
     def __init__(self, chat_client: AIChatClient | None = None, **kwargs):
         super().__init__(**kwargs)
         self._chat = chat_client
+        if not config.SIGNING_KEY:
+            self.log.warning("sms_disabled", reason="SIGNALWIRE_SIGNING_KEY unset: /sms answers 403")
         self.mount(self.sms_router())
 
     @property
@@ -96,7 +101,7 @@ class SmsConcierge(HotelConcierge):
         @router.post(config.SMS_ROUTE)
         async def inbound_sms(request: Request) -> Response:
             raw = (await request.body()).decode()
-            if config.SIGNING_KEY and not validate_webhook_signature(
+            if not config.SIGNING_KEY or not validate_webhook_signature(  # no key: refuse, never trust
                 config.SIGNING_KEY, request.headers.get("X-SignalWire-Signature", ""),
                 config.PUBLIC_URL.rstrip("/") + config.SMS_ROUTE, raw,
             ):

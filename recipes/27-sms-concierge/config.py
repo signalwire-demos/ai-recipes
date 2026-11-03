@@ -24,6 +24,12 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+# .env.example ships SWML_BASIC_AUTH_PASSWORD=change-me. Anyone who has read this repo knows it,
+# and it guards the SWML, every tool and every route here, so never serve with it.
+if os.environ.get("SWML_BASIC_AUTH_PASSWORD", "").strip() == "change-me":
+    raise SystemExit("SWML_BASIC_AUTH_PASSWORD is still the .env.example placeholder: "
+                     "set a long random value (python -c 'import secrets; print(secrets.token_urlsafe(24))').")
+
 # The SDK builds its webhook URLs from SWML_PROXY_URL_BASE. Recipes use PUBLIC_URL.
 if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
     os.environ["SWML_PROXY_URL_BASE"] = os.environ["PUBLIC_URL"].rstrip("/")
@@ -54,7 +60,7 @@ CHAT_API_URL = os.environ.get("CHAT_API_URL") or (
     f"https://{_space if '.' in _space else _space + '.signalwire.com'}/api/ai/chat" if _space else ""
 )
 SMS_CONVERSATION_PREFIX = "sms."                     # conversation id = prefix + sender digits
-SIGNING_KEY = os.environ.get("SIGNALWIRE_SIGNING_KEY", "")  # optional: /sms rejects unsigned requests
+SIGNING_KEY = os.environ.get("SIGNALWIRE_SIGNING_KEY", "")  # required: without it /sms answers 403
 
 # --- Server ---------------------------------------------------------------
 PORT = int(os.environ.get("PORT", "3000"))

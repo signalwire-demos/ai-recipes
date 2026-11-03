@@ -57,6 +57,7 @@ sequenceDiagram
 | Room from `global_data`, never from args | `concierge.py`, `request_service` |
 | `AIChatClient.chat(conversation_id, message, config_url=...)` | `app.py`, `SmsConcierge.answer` |
 | Inbound SMS, both payload formats | `app.py`, `parse_inbound` / `render_reply` |
+| `validate_webhook_signature` (required) | `app.py`, `sms_router` |
 
 ## Prerequisites
 
@@ -84,12 +85,18 @@ git clone https://github.com/signalwire-demos/ai-recipes
 cd ai-recipes/recipes/27-sms-concierge
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL and basic auth
+cp .env.example .env    # fill in the SIGNALWIRE_* keys (signing key too), PUBLIC_URL and basic auth
 ```
 
 `PUBLIC_URL` and the basic auth values are required for SMS: the chat `config_url` is built
 from them (`https://USER:PASS@<PUBLIC_URL host>/`). Set `CHAT_CONFIG_URL` to override it.
-Optional: `SIGNALWIRE_SIGNING_KEY` makes `/sms` and the agent routes reject unsigned requests.
+
+`SIGNALWIRE_SIGNING_KEY` is required too (Dashboard > API, the **Signing Key**). Without it
+`/sms` answers 403 to everything and the app logs `sms_disabled` at startup. A texting guest's
+conversation is keyed by the sender's number alone, so an unsigned POST with a forged `From`
+would resume that guest's verified conversation. With the key set, `/sms` and the agent
+routes accept only requests with a valid `X-SignalWire-Signature`, and `PUBLIC_URL` must be
+the exact URL SignalWire posts to, because the signature covers it.
 
 ## Run locally
 
@@ -129,9 +136,8 @@ swaig-test app.py --custom-data '{"global_data": {"guest": {"room": "412", "name
   --exec request_service --service "extra towels"
 ```
 
-Test guests: room 412 (Rivera), room 1108 (Chen). With real credentials and `PUBLIC_URL` set,
-`curl -s localhost:3000/sms -H 'content-type: application/json' -d
-'{"message": {"from": "+15550142", "body": "Room 412, Rivera"}}'` runs a real chat turn.
+Test guests: room 412 (Rivera), room 1108 (Chen). A bare `curl` to `/sms` gets 403 because it
+isn't signed (the tests sign theirs). To run a real chat turn by hand, text the number.
 
 ## Deploy
 
