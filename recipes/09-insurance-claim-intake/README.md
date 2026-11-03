@@ -113,6 +113,9 @@ curl -u USER:PASS "http://localhost:3000/brief?claim=CL-0001&call=test"   # the 
 
 With `ADJUSTER_NUMBER` or `FROM_NUMBER` unset, `submit_claim` goes straight to `callback`.
 Set both to see the `hold` and `rpc_dial` actions in the `--exec` output.
+`scripts/validate_swml.py` flags `gather_info` in the `intake` step: signalwire-sdk 3.7.5's bundled
+`schema.json` doesn't list the key its own `set_gather_info` emits. That clears when the bundled
+schema catches up; nothing in `app.py` needs to change.
 
 ## Deploy
 

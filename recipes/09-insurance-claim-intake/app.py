@@ -170,7 +170,8 @@ class ClaimIntakeAgent(AgentBase):
             "type": "object",
             "properties": {
                 "preferred_time": {"type": "string",
-                                   "description": "When to call back, e.g. 'tomorrow after 2pm'"},
+                                   "description": "When the caller wants the callback, in their words "
+                                                  "(day and time window). Ask if not provided."},
             },
             "required": ["preferred_time"],
         },
