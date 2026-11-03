@@ -16,22 +16,28 @@ from consumer import TranscriptStore
 from replay import restamp
 
 AUTH = {"Authorization": "Basic " + base64.b64encode(b"recipe:test-pass").decode()}
+VIEWER = {"Authorization": "Basic " + base64.b64encode(b"screen:view-pass").decode()}
 
 
 @pytest.fixture
 def svc(monkeypatch):
     monkeypatch.setenv("SWML_BASIC_AUTH_USER", "recipe")
     monkeypatch.setenv("SWML_BASIC_AUTH_PASSWORD", "test-pass")
+    monkeypatch.setattr(config, "VIEWER_USER", "screen")
+    monkeypatch.setattr(config, "VIEWER_PASSWORD", "view-pass")
     return recipe.create_service()
 
 
 def test_captions_page_requires_auth_and_subscribes_to_sse(svc, tmp_path):
     client = TestClient(recipe.create_app(svc, TranscriptStore(tmp_path)))
     assert client.get("/captions").status_code == 401
-    page = client.get("/captions", headers=AUTH)
+    assert client.get("/captions", headers=AUTH).status_code == 200
+    page = client.get("/captions", headers=VIEWER)  # the read-only viewer login is enough
     assert page.status_code == 200 and page.headers["content-type"].startswith("text/html")
     html = page.text
-    assert 'new EventSource("/events"' in html and 'addEventListener("segment"' in html
+    assert 'new EventSource("/events?call_id=" + encodeURIComponent(callId))' in html
+    assert 'addEventListener("segment"' in html and ".textContent = seg.text" in html
+    assert "innerHTML = seg" not in html and "all calls" not in html  # per call, text only
     assert "__CAPTION_SETTINGS__" not in html
     settings = json.loads(html.split("const SETTINGS = ", 1)[1].split(";\n", 1)[0])
     assert settings["labels"] == config.SPEAKER_LABELS
