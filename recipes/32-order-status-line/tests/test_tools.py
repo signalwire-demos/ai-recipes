@@ -20,6 +20,8 @@ from app import OrderStatusAgent  # noqa: E402
 
 HIDDEN_FIELDS = ["risk_flag", "prior_refunds", "internal_notes", "total"]  # in the record, never projected
 THRESHOLD_NAMES = ["AUTO_CREDIT_LIMIT", "MAX_PRIOR_REFUNDS", "REFUNDABLE_STATUSES", "threshold", "limit"]
+CALLER_SUPPLIED = [("verify_identity", "order_number"), ("verify_identity", "postal_code"),
+                   ("request_refund", "reason")]
 
 
 @pytest.fixture(scope="module")
@@ -110,6 +112,14 @@ def test_refund_requires_verification(agent):
     assert agent.request_refund({"reason": "x"}, {}).to_dict()["response"] == "The caller is not verified."
 
 
+def test_refund_without_a_reason_asks_and_writes_nothing(agent):
+    gd = verified_gd(agent, "100235", "74012")          # the order the rule would auto-credit
+    result = agent.request_refund({}, {"global_data": gd})
+    assert actions(result) == []
+    assert "why" in result.to_dict()["response"].lower()
+    assert not config.CREDITS_FILE.exists()
+
+
 def test_escalate_call(agent, monkeypatch):
     monkeypatch.setattr(config, "ESCALATION_NUMBER", "")
     assert find(actions(agent.escalate_call({}, {})), "hangup") == [True]
@@ -172,3 +182,25 @@ def test_governance_verify_step_shape_matches_recipe_08(ai):
     assert steps["verify_identity"]["valid_steps"] == []
     assert steps["order_status"]["functions"] == ["request_refund"]
     assert steps["escalate"]["valid_steps"] == [] and steps["wrap_up"]["functions"] == []
+
+
+def test_governance_tool_schemas_are_typed_and_ask(ai):
+    fns = {f["function"]: f["parameters"] for f in ai["SWAIG"]["functions"]}
+    verify = fns["verify_identity"]["properties"]
+    assert re.fullmatch(verify["order_number"]["pattern"], "100234")
+    assert not re.fullmatch(verify["order_number"]["pattern"], "100-234")
+    assert re.fullmatch(verify["postal_code"]["pattern"], "74012")
+    for loose in ("7401", "740121", "74012-1234"):
+        assert not re.fullmatch(verify["postal_code"]["pattern"], loose), loose
+    assert set(fns["verify_identity"]["required"]) == set(verify)
+    assert fns["request_refund"]["required"] == ["reason"]
+    assert "in their words" in fns["request_refund"]["properties"]["reason"]["description"]
+    for tool, name in CALLER_SUPPLIED:
+        desc = fns[tool]["properties"][name]["description"].lower()
+        assert "ask" in desc, f"{tool}.{name}: the description must tell the model to ask"
+
+
+def test_governance_steps_ask_before_each_tool(ai):
+    steps = steps_of(ai)
+    assert "Ask, one at a time, for their order number and then the ZIP code" in steps["verify_identity"]["text"]
+    assert "ask why, then call request_refund" in steps["order_status"]["text"]
