@@ -147,6 +147,13 @@ Dashboard SWML script.
 ## What to change first
 
 Open `config.py`: point `TRACKING_URL` at your carrier (or set `TRACKING_API_URL` and
-`TRACKING_API_KEY` in `.env`; the key goes in the webhook's `Authorization` header in the SWML, which is behind basic auth, and never in
-the prompt or `global_data`), then rewrite `OUTPUT_TEMPLATE` with the field names your
+`TRACKING_API_KEY` in `.env`; the key goes in the webhook's `Authorization` header in the SWML,
+never in the prompt or `global_data`), then rewrite `OUTPUT_TEMPLATE` with the field names your
 carrier's JSON uses. `COMPANY_NAME` and `VOICE` set the greeting.
+
+Security note: a DataMap runs on SignalWire's servers, so `TRACKING_API_KEY` ships in plain text
+in every SWML document this app serves. Anyone who can fetch the SWML (anyone with the basic-auth
+credentials) can read it, and it can show up in SignalWire's call and SWML logs. Use a
+read-only key scoped to tracking lookups, rotate it if the basic-auth password leaks, and use
+a webhook tool (a Python handler that holds the key) instead if the key can do more than read.
+This app never logs the key (a test checks that).
