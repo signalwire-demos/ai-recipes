@@ -24,6 +24,12 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+# .env.example ships SWML_BASIC_AUTH_PASSWORD=change-me. Anyone who has read this repo knows it,
+# and it guards the SWML, every tool and every route here, so never serve with it.
+if os.environ.get("SWML_BASIC_AUTH_PASSWORD", "").strip() == "change-me":
+    raise SystemExit("SWML_BASIC_AUTH_PASSWORD is still the .env.example placeholder: "
+                     "set a long random value (python -c 'import secrets; print(secrets.token_urlsafe(24))').")
+
 # The SDK builds its webhook URLs from SWML_PROXY_URL_BASE. Recipes use PUBLIC_URL.
 if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
     os.environ["SWML_PROXY_URL_BASE"] = os.environ["PUBLIC_URL"].rstrip("/")
@@ -37,6 +43,9 @@ LANGUAGE_CODE = "en-US"
 # Everything else stays voice-only. transfer_to_human moves a live call, which
 # means nothing to a chat client, so it is not on this list.
 MCP_TOOLS = ["lookup_customer", "book_callback"]
+# /mcp's own credential: clients send "Authorization: Bearer <MCP_TOKEN>". The SWML basic auth
+# is not accepted there. Blank: /mcp answers 401 to everything.
+MCP_TOKEN = os.environ.get("MCP_TOKEN", "")
 
 CUSTOMERS_FILE = HERE / "data" / "customers.json"    # mock CRM; swap for yours
 CALLBACKS_FILE = Path(os.environ.get("CALLBACKS_FILE", HERE / "data" / "runtime" / "callbacks.jsonl"))
