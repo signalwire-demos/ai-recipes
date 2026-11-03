@@ -20,6 +20,12 @@ SLOTS = config.SLOTS
 ONE_DAY = re.compile(r"\b(same|that|one|just the) day\b|\bjust (that|one|the one) day\b", re.I)
 
 
+def slot_schema(desc: str, check) -> dict:
+    """One record_slots property. A one_of validator carries its choices, which become the enum."""
+    choices = getattr(check, "choices", None)
+    return {"type": "string", "description": desc, **({"enum": list(choices)} if choices else {})}
+
+
 def summary(report: dict) -> str:
     days = report["start_date"] if report["start_date"] == report["end_date"] \
         else f"{report['start_date']} through {report['end_date']}"
@@ -67,7 +73,7 @@ class AbsenceAgent(AgentBase):
             name="record_slots",
             description="Record any absence details the caller just gave, in any order. "
                         "Leave out anything they didn't say.",
-            parameters={name: {"type": "string", "description": desc} for name, (desc, _) in SLOTS.items()},
+            parameters={name: slot_schema(desc, check) for name, (desc, check) in SLOTS.items()},
             required=[],
             handler=self.record_slots,
         )
