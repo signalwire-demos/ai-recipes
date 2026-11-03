@@ -20,9 +20,14 @@ from signalwire.core.security import validate_webhook_signature
 import config
 
 SLOT = {
-    "date": {"type": "string", "description": "Slot date, YYYY-MM-DD, from the open slots list"},
-    "time": {"type": "string", "description": "Slot time, HH:MM, from the open slots list"},
+    "date": {"type": "string", "format": "date",
+             "description": "Slot date the caller chose, YYYY-MM-DD, one of the dates in the open slots "
+                            "list. Ask if not provided; never assume today or pick a date for the caller."},
+    "time": {"type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+             "description": "Slot time the caller chose, HH:MM 24-hour, one of the times listed for that "
+                            "date. Ask if not provided."},
 }
+NAME = {"type": "string", "description": "Caller's full name as they say it. Ask if not provided."}
 
 
 # --- booking store (data/bookings.json; swap for your scheduling system) ----
@@ -72,15 +77,18 @@ class ConfirmationAgent(AgentBase):
 
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("book") \
-            .set_text("Ask for the caller's name and which open slot they want, then call book_appointment.") \
+            .set_text("Ask for, one at a time: the caller's name, then the date, then the time, matching "
+                      "an open slot. Never fill in a value the caller did not give, never assume the date "
+                      "is today and never pick a slot for them. Then call book_appointment.") \
             .set_functions(["book_appointment"]) \
             .set_valid_steps([])
         ctx.add_step("reschedule") \
             .set_text(
                 "You called ${global_data.booking.name} back because they texted about booking "
                 "${global_data.booking.confirmation} on ${global_data.booking.date} at "
-                "${global_data.booking.time}. Ask which open slot they want instead, then call "
-                "reschedule_appointment."
+                "${global_data.booking.time}. Ask for, one at a time: the new date, then the new time, "
+                "matching an open slot. Never hand back their current slot and never fill in a value "
+                "the caller did not give. Then call reschedule_appointment."
             ) \
             .set_functions(["reschedule_appointment"]) \
             .set_valid_steps([])
@@ -131,16 +139,18 @@ class ConfirmationAgent(AgentBase):
         name="book_appointment",
         description="Book an open slot for the caller.",
         parameters={"type": "object", "required": ["name", "date", "time"],
-                    "properties": {"name": {"type": "string", "description": "Caller's name"}, **SLOT}},
+                    "properties": {"name": NAME, **SLOT}},
     )
     def book_appointment(self, args, raw_data):
+        name = str(args.get("name", "")).strip()
+        if not name:  # required in the schema, enforced here: no row, no text, the call stays in book
+            return FunctionResult("Ask for the caller's name before booking.")
         date, time = str(args.get("date", "")).strip(), str(args.get("time", "")).strip()
         if problem := self.slot_problem(date, time):
             return FunctionResult(problem)
         phone = (raw_data.get("global_data") or {}).get("caller") or raw_data.get("caller_id_num", "")
         rows = load_bookings()
-        booking = {"confirmation": next_confirmation(rows), "phone": phone,
-                   "name": str(args.get("name", "")).strip(), "date": date, "time": time}
+        booking = {"confirmation": next_confirmation(rows), "phone": phone, "name": name, "date": date, "time": time}
         save_bookings(rows + [booking])
         return self.confirm(booking, "Booked.")
 
@@ -153,6 +163,8 @@ class ConfirmationAgent(AgentBase):
         if row is None:
             return FunctionResult("I can't find that booking. Apologize and say the office will call back.")
         date, time = str(args.get("date", "")).strip(), str(args.get("time", "")).strip()
+        if (date, time) == (row["date"], row["time"]):
+            return FunctionResult("That is their current slot. Ask for a different one.")
         if problem := self.slot_problem(date, time, keep=row["confirmation"]):
             return FunctionResult(problem)
         row.update(date=date, time=time)
