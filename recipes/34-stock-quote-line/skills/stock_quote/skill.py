@@ -23,7 +23,8 @@ TICKER = re.compile(r"^[A-Z][A-Z.]{0,5}$")
 
 
 class QuoteUnavailable(Exception):
-    """The provider didn't answer, or answered with an error."""
+    """The provider didn't answer, or answered with an error. The message never holds the
+    request URL: Alpha Vantage only takes its key in the query string."""
 
 
 def mock_quote(symbol, params):
@@ -46,20 +47,23 @@ def alphavantage_quote(symbol, params):
 
 
 def finnhub_quote(symbol, params):
-    q = _get("https://finnhub.io/api/v1/quote", params, {"symbol": symbol, "token": params["api_key"]})
+    q = _get("https://finnhub.io/api/v1/quote", params, {"symbol": symbol},
+             headers={"X-Finnhub-Token": params["api_key"]})  # header, so the key stays out of URLs
     if not q.get("c"):            # Finnhub answers unknown symbols with all zeros
         return None
     return {"symbol": symbol, "name": None, "price": float(q["c"]),
             "change": float(q.get("d") or 0), "change_pct": float(q.get("dp") or 0)}
 
 
-def _get(url, params, query):
+def _get(url, params, query, headers=None):
     try:
-        resp = requests.get(url, params=query, timeout=params.get("timeout", 5))
+        resp = requests.get(url, params=query, headers=headers, timeout=params.get("timeout") or 5)
         resp.raise_for_status()
         return resp.json()
     except (requests.RequestException, ValueError) as exc:
-        raise QuoteUnavailable(str(exc)) from None
+        # str(exc) can carry the full URL, query-string key included: log the type and status only.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        raise QuoteUnavailable(f"{type(exc).__name__}" + (f" (HTTP {status})" if status else "")) from None
 
 
 PROVIDERS = {"mock": mock_quote, "alphavantage": alphavantage_quote, "finnhub": finnhub_quote}

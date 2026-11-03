@@ -56,8 +56,8 @@ def http(monkeypatch):
     calls = []
 
     def install(body=None, exc=None):
-        def fake_get(url, params=None, timeout=None):
-            calls.append({"url": url, "params": params})
+        def fake_get(url, params=None, headers=None, timeout=None):
+            calls.append({"url": url, "params": params, "headers": headers, "timeout": timeout})
             if exc:
                 raise exc
             return FakeResponse(body)
@@ -139,6 +139,9 @@ def test_finnhub_adapter(http):
     agent = bare_agent({"provider": "finnhub", "api_key": FAKE_KEY})
     assert run(agent, "get_stock_quote", "AAPL") == "A A P L is at 211.30 dollars, up 2.10, or 1.00 percent, today."
     assert calls[0]["url"] == "https://finnhub.io/api/v1/quote"
+    assert calls[0]["params"] == {"symbol": "AAPL"}               # key is not in the query string
+    assert calls[0]["headers"] == {"X-Finnhub-Token": FAKE_KEY}
+    assert calls[0]["timeout"] == 5
     http({"c": 0, "d": None, "dp": None, "h": 0, "l": 0, "o": 0, "pc": 0})
     assert "couldn't find" in run(agent, "get_stock_quote", "NOPE")
 
@@ -147,6 +150,22 @@ def test_network_failure_is_spoken_not_raised(http):
     http(exc=requests.ConnectionError("down"))
     agent = bare_agent({"provider": "finnhub", "api_key": FAKE_KEY})
     assert "isn't answering" in run(agent, "get_stock_quote", "AAPL")
+
+
+def test_provider_error_never_logs_the_key(http, caplog):
+    """requests puts the full URL (Alpha Vantage's apikey=... included) in its exception text."""
+    leaky = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&apikey={FAKE_KEY}"
+    resp = FakeResponse({}, status=429)
+    http(exc=requests.HTTPError(f"429 Client Error: Too Many Requests for url: {leaky}", response=resp))
+    agent = bare_agent({"provider": "alphavantage", "api_key": FAKE_KEY})
+    with caplog.at_level("DEBUG"):
+        assert "isn't answering" in run(agent, "get_stock_quote", "IBM")
+    assert "HTTPError (HTTP 429)" in caplog.text
+    assert FAKE_KEY not in caplog.text
+    http(exc=requests.ConnectionError(f"Max retries exceeded with url: {leaky}"))
+    with pytest.raises(sq.QuoteUnavailable) as err:
+        sq.alphavantage_quote("IBM", {"api_key": FAKE_KEY})
+    assert FAKE_KEY not in str(err.value) and "apikey" not in str(err.value)
 
 
 # --- two agents, one skill ---------------------------------------------------------
