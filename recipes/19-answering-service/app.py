@@ -9,6 +9,8 @@ chooses between the two, and it has no connect or SMS tool.
 """
 import json
 import re
+import threading
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -17,6 +19,8 @@ from signalwire import AgentBase, FunctionResult
 import config
 
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_last_sms: dict[str, float] = {}    # caller ID -> monotonic time of the last owner text
+_sms_lock = threading.Lock()
 
 
 def parse_hours(spec: str) -> dict:
@@ -42,6 +46,25 @@ def is_urgent(text: str) -> bool:
     """The urgency rule. Whole-word match on config.URGENT_KEYWORDS."""
     text = text.lower()
     return any(re.search(rf"\b{re.escape(k)}\b", text) for k in config.URGENT_KEYWORDS)
+
+
+def phone_number(text: str) -> str | None:
+    """Spoken or typed callback number -> E.164, or None. NANP: 10 digits, or 11 starting with 1."""
+    digits = re.sub(r"[\s().-]", "", str(text))
+    if re.fullmatch(r"\+?1?[2-9]\d{2}[2-9]\d{6}", digits):
+        return "+1" + digits[-10:]
+    return digits if re.fullmatch(r"\+[2-9]\d{7,14}", digits) else None
+
+
+def sms_allowed(caller_id: str, now: float | None = None) -> bool:
+    """One owner text per caller ID per SMS_THROTTLE_MINUTES (anonymous callers share one slot)."""
+    now = time.monotonic() if now is None else now
+    with _sms_lock:
+        last = _last_sms.get(caller_id)
+        if last is not None and now - last < config.SMS_THROTTLE_MINUTES * 60:
+            return False
+        _last_sms[caller_id] = now
+        return True
 
 
 def office_swml() -> dict:
@@ -114,8 +137,6 @@ class AnsweringService(AgentBase):
         missing = [k for k in ("name", "callback_number", "message") if not str(args.get(k) or "").strip()]
         if missing:
             return FunctionResult(f"Still need: {', '.join(missing)}. Ask for it.")
-        if len(re.sub(r"\D", "", str(args["callback_number"]))) < 7:   # the pattern is advisory; code checks
-            return FunctionResult("That callback_number doesn't look complete. Ask for it again.")
         if is_urgent(args["message"]):
             return self.forward_urgent(args)
         return self.take_message(args, raw_data)
@@ -126,9 +147,16 @@ class AnsweringService(AgentBase):
             .connect(config.ONCALL_NUMBER, final=True, from_addr=config.FROM_NUMBER)
 
     def take_message(self, args, raw_data):
+        number = phone_number(args["callback_number"])   # an emergency is never held up by this
+        if not number:
+            return FunctionResult("That callback_number isn't a full phone number. Ask for it again, "
+                                  "area code first.")
         caller_id = raw_data.get("caller_id_num") or "unknown"
+        if not sms_allowed(caller_id):
+            return FunctionResult(f"A message from this number already reached {config.OWNER_NAME} a few "
+                                  "minutes ago, so no new text was sent.").swml_change_step("wrap_up")
         body = (f"After-hours message for {config.BUSINESS_NAME}: {args['name']}, call back "
-                f"{args['callback_number']} (caller ID {caller_id}). \"{args['message']}\"")
+                f"{number} (caller ID {caller_id}). \"{args['message']}\"")
         return FunctionResult("Message sent.") \
             .send_sms(to_number=config.OWNER_NUMBER, from_number=config.SMS_FROM, body=body) \
             .swml_change_step("wrap_up")

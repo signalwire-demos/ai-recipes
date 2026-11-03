@@ -19,7 +19,10 @@ on every call and checks the clock. During hours it renders SWML that is just `c
 `hangup`, with no `ai` verb. After hours, the AI has exactly one tool, `submit_call`. Its
 handler applies the urgency rule (`is_urgent`, a whole-word keyword list in `config.py`) and
 either connects to on-call (`forward_urgent`) or sends the SMS (`take_message`). The model can't
-choose a route: there's no connect, forward or SMS tool for it to call. The clock is injected
+choose a route: there's no connect, forward or SMS tool for it to call. Before texting,
+`take_message` checks the callback number is a real phone number (`phone_number`, normalized to
+E.164) and sends at most one owner text per caller ID every `SMS_THROTTLE_MINUTES`
+(`sms_allowed`), so repeat calls can't flood the owner. The clock is injected
 (`AnsweringService(clock=...)`), so the tests pin it to a weekday, a night, a Sunday and a
 holiday.
 
@@ -45,6 +48,7 @@ stateDiagram-v2
 | `FunctionResult.connect` | `app.py`, `forward_urgent` |
 | `FunctionResult.send_sms` + `swml_change_step` | `app.py`, `take_message` |
 | Urgency rule | `app.py`, `is_urgent`; keywords in `config.URGENT_KEYWORDS` |
+| Callback number check, per-caller SMS throttle | `app.py`, `phone_number`, `sms_allowed` |
 
 ## Prerequisites
 
@@ -71,7 +75,8 @@ cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL and basic au
 
 In `.env`, set `TZ` (an IANA zone such as `America/New_York`), `HOURS` (for example
 `mon-fri 09:00-17:00; sat 10:00-14:00`), `OFFICE_NUMBER`, `ONCALL_NUMBER`, `OWNER_NUMBER` (who
-gets the text; defaults to the office number), `FROM_NUMBER` and `SMS_FROM`. Add closed dates
+gets the text; defaults to the office number), `FROM_NUMBER` and `SMS_FROM`.
+`SMS_THROTTLE_MINUTES` (default 15) is the gap between owner texts from one caller ID. Add closed dates
 to `data/holidays.json`.
 
 ## Run locally
@@ -94,7 +99,7 @@ pytest -q
 swaig-test app.py --list-tools
 HOURS="mon-sun 00:00-24:00" swaig-test app.py --dump-swml --raw | jq '.sections.main'   # office: no ai
 HOURS="mon 00:00-00:00" swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
-swaig-test app.py --exec submit_call --name Pat --callback_number 5550142 --message "pipe burst"
+swaig-test app.py --exec submit_call --name Pat --callback_number 4125550142 --message "pipe burst"
 ```
 
 Set `HOURS` in the shell as shown. `swaig-test --env` applies too late for `config.py` to see it.

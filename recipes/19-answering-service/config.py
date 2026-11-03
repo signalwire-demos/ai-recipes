@@ -24,6 +24,12 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+# .env.example ships SWML_BASIC_AUTH_PASSWORD=change-me. Anyone who has read this repo knows it,
+# and it guards the SWML, every tool and every route here, so never serve with it.
+if os.environ.get("SWML_BASIC_AUTH_PASSWORD", "").strip() == "change-me":
+    raise SystemExit("SWML_BASIC_AUTH_PASSWORD is still the .env.example placeholder: "
+                     "set a long random value (python -c 'import secrets; print(secrets.token_urlsafe(24))').")
+
 # The SDK builds its webhook URLs from SWML_PROXY_URL_BASE. Recipes use PUBLIC_URL.
 if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
     os.environ["SWML_PROXY_URL_BASE"] = os.environ["PUBLIC_URL"].rstrip("/")
@@ -48,6 +54,7 @@ OWNER_NUMBER = os.environ.get("OWNER_NUMBER") or OFFICE_NUMBER      # gets the a
 FROM_NUMBER = os.environ.get("FROM_NUMBER") or os.environ.get("OUTBOUND_2", "+15550103")
 SMS_FROM = os.environ.get("SMS_FROM") or os.environ.get("SMS_1", "+15550104")
 CONNECT_TIMEOUT = 25                         # seconds to ring the office or on-call line
+SMS_THROTTLE_MINUTES = int(os.environ.get("SMS_THROTTLE_MINUTES", "15"))   # one owner text per caller ID per window
 
 # The urgency rule: a message containing any of these is forwarded to on-call, not texted.
 URGENT_KEYWORDS = ["emergency", "flood", "flooding", "burst", "leak", "leaking", "gas",
