@@ -24,6 +24,12 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+# .env.example ships SWML_BASIC_AUTH_PASSWORD=change-me. Anyone who has read this repo knows it,
+# and it guards the SWML, every tool and every route here, so never serve with it.
+if os.environ.get("SWML_BASIC_AUTH_PASSWORD", "").strip() == "change-me":
+    raise SystemExit("SWML_BASIC_AUTH_PASSWORD is still the .env.example placeholder: "
+                     "set a long random value (python -c 'import secrets; print(secrets.token_urlsafe(24))').")
+
 # The SDK builds its webhook URLs from SWML_PROXY_URL_BASE. Recipes use PUBLIC_URL.
 if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
     os.environ["SWML_PROXY_URL_BASE"] = os.environ["PUBLIC_URL"].rstrip("/")
@@ -49,8 +55,19 @@ BRIDGE_FROM = os.environ.get("MEETING_BRIDGE_FROM", os.environ.get("OUTBOUND_2",
 TRANSCRIPT_WEBHOOK_URL = os.environ.get("TRANSCRIPT_WEBHOOK_URL", "")
 TRANSCRIPT_PATH = "/transcript"
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
+# Optional: Dashboard > API > Signing Key. When set, POST /transcript also needs a valid
+# X-SignalWire-Signature (unverified on a live live_transcribe call; see the README).
+SIGNING_KEY = os.environ.get("SIGNALWIRE_SIGNING_KEY", "")
+
+# Read-only viewer login for captions screens and transcript viewers. It can read one call
+# it names (/calls/<id>, /events?call_id=<id>) and nothing else: no POST /transcript, no
+# /calls listing, no all-calls stream. Unset (or equal to the SWML basic auth) = no viewer
+# login; only the SWML basic auth can read.
+VIEWER_USER = os.environ.get("VIEWER_USER", "")
+VIEWER_PASSWORD = os.environ.get("VIEWER_PASSWORD", "")
 
 # --- Server ---------------------------------------------------------------
 PORT = int(os.environ.get("PORT", "3000"))
 ROUTE = "/"
 SSE_KEEPALIVE_SECONDS = 15
+SSE_QUEUE_MAX = 256                          # a subscriber this many segments behind is dropped
