@@ -8,7 +8,8 @@ The caller gives an order number and the shipping ZIP code. Once those match an 
 mock CRM (`data/orders.json`), the agent can tell them the order status, the estimated delivery
 and what's in it. If the caller asks for a refund, a server-side rule decides: small orders on
 clean accounts get an automatic credit (written to `data/runtime/credits.jsonl`), and everything
-else goes to a specialist. Three failed verifications also go to the specialist.
+else goes to a specialist. Each order is credited at most once, so asking again on the same
+call or on a later one doesn't pay out twice. Three failed verifications also go to the specialist.
 
 ## What it demonstrates
 
@@ -19,7 +20,10 @@ model's context on its own: it reaches the model only through `${global_data.*}`
 and the `order_status` step text is built from `config.CURATED_FIELDS` (status, ETA, items).
 The refund thresholds live in `config.py` and are read only inside `request_refund`, which tells
 the model the outcome ("a credit was issued" or "this needs a specialist") and never the rule.
-The model can't leak a flag it never saw, or argue with a limit it doesn't know.
+The model can't leak a flag it never saw, or argue with a limit it doesn't know. A refund is
+handled once per call (`request_refund` checks `global_data.refund`), and `crm.issue_credit`
+dedupes by order id under a lock, so a repeat request or a later call gets the first reference
+back and no second credit.
 
 The verification step has the same shape as recipe 08 (copied, not imported): one tool,
 `valid_steps=[]`, and the third failure jumps to `escalate`.
@@ -44,6 +48,7 @@ stateDiagram-v2
 | Full record into `global_data` | `app.py`, `verify_identity` handler |
 | Curated `${global_data.order.<field>}` slice | `app.py`, `curated_step_text()`, fields from `config.CURATED_FIELDS` |
 | Refund rule, server side only | `app.py`, `refund_decision()`, thresholds in `config.py` |
+| One credit per order (lock + dedupe) | `app.py`, `request_refund`; `crm.py`, `issue_credit()` |
 | `swml_change_step("escalate")` | `app.py`, `request_refund` and `verify_identity` handlers |
 | `set_functions` + `set_valid_steps([])` | `app.py`, steps `verify_identity`, `wrap_up`, `escalate` |
 | `connect()` or `hangup()` | `app.py`, `escalate_call` handler |
@@ -128,8 +133,9 @@ docker compose up --build          # reads .env, serves on :3000
 
 Put it behind any HTTPS host and point the number at `https://USER:PASS@<host>/`.
 Serverless: the order record travels in `global_data`, so the agent is stateless, but
-`crm.issue_credit` appends to a local file. Point `CREDITS_FILE` (or `crm.issue_credit`) at
-real storage before deploying to Lambda or Cloud Functions.
+`crm.issue_credit` appends to a local file, and its once-per-order lock is per process. Point
+`CREDITS_FILE` (or `crm.issue_credit`) at real storage with a unique key on the order id before
+deploying to Lambda or Cloud Functions.
 
 ## What to change first
 

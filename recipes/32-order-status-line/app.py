@@ -123,11 +123,18 @@ class OrderStatusAgent(AgentBase):
         order = gd.get("order")
         if not gd.get("verified") or not order:
             return FunctionResult("The caller is not verified.")
+        if gd.get("refund"):   # one refund request per call, whatever the first outcome was
+            return FunctionResult("A refund was already handled on this call. Tell the caller nothing more "
+                                  "can be done here.")
         reason = str(args.get("reason", "")).strip()
         if not reason:  # required: never credit (or write) a refund with no stated reason
             return FunctionResult("Ask the caller why they want the refund, then call request_refund again.")
         if refund_decision(order):
-            ref = crm.issue_credit(order["id"], order["total"], reason)
+            ref, created = crm.issue_credit(order["id"], order["total"], reason)
+            if not created:   # credited on an earlier call: the CRM dedupes by order id
+                return FunctionResult(f"This order was already credited, reference {ref}. Tell the caller "
+                                      "no second credit can be issued.").update_global_data(
+                    {"refund": {"outcome": "already_credited", "ref": ref}})
             return FunctionResult(
                 f"A credit of ${order['total']:,.2f} has been issued to the original payment method, "
                 f"reference {ref}. Tell the caller it shows up in three to five business days."
