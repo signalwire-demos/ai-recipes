@@ -73,10 +73,14 @@
     window.scrollTo(0, document.body.scrollHeight);
   }
 
-  const source = new EventSource("/events" + (callId ? "?call_id=" + encodeURIComponent(callId) : ""));
-  source.addEventListener("segment", (e) => render(JSON.parse(e.data)));
-  source.onopen = () => { status.textContent = "live" + (callId ? " · " + callId : " · all calls"); status.className = "live"; };
-  source.onerror = () => { status.textContent = "reconnecting"; status.className = ""; };
+  if (!callId) {
+    status.textContent = "add ?call_id=<id> to the URL";  // the stream is per call (no firehose)
+  } else {
+    const source = new EventSource("/events?call_id=" + encodeURIComponent(callId));
+    source.addEventListener("segment", (e) => render(JSON.parse(e.data)));
+    source.onopen = () => { status.textContent = "live · " + callId; status.className = "live"; };
+    source.onerror = () => { status.textContent = "reconnecting"; status.className = ""; };
+  }
 </script>
 </body>
 </html>

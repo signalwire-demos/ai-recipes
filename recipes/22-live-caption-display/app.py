@@ -18,6 +18,7 @@ from urllib.parse import quote, urlparse
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from signalwire.core.security import validate_webhook_signature
 from signalwire.core.swml_service import SWMLService
 
 import config
@@ -31,6 +32,24 @@ def webhook_url(svc: SWMLService) -> str:
     user, password = svc.get_basic_auth_credentials()
     auth = f"{quote(user, safe='')}:{quote(password, safe='')}"
     return f"{base.scheme}://{auth}@{base.netloc}{base.path.rstrip('/')}{config.TRANSCRIPT_PATH}"
+
+
+def signature_verifier(svc: SWMLService):
+    """None without a signing key. The signed URL is the webhook URL, tried with and without
+    its user:pass@ part (which one the platform signs is not confirmed)."""
+    if not config.SIGNING_KEY:
+        return None
+    url = urlparse(webhook_url(svc))
+    urls = {url.geturl(), url._replace(netloc=url.netloc.rpartition("@")[2]).geturl()}
+    return lambda headers, raw: any(validate_webhook_signature(
+        config.SIGNING_KEY, headers.get("x-signalwire-signature", ""), u, raw) for u in urls)
+
+
+def auth_checkers(svc: SWMLService):
+    """(platform, viewer). The viewer login is off when unset or equal to the platform pair."""
+    platform = svc.get_basic_auth_credentials()
+    viewer = (config.VIEWER_USER, config.VIEWER_PASSWORD)
+    return basic_auth_checker(*platform), basic_auth_checker(*(viewer if viewer != tuple(platform) else ("", "")))
 
 
 def build_swml(svc: SWMLService) -> None:
@@ -62,14 +81,16 @@ def create_service() -> SWMLService:
 
 def create_app(svc: SWMLService, store: TranscriptStore | None = None) -> FastAPI:
     store = store or TranscriptStore(config.TRANSCRIPT_DIR)
-    check_auth = basic_auth_checker(*svc.get_basic_auth_credentials())
+    check_platform, check_viewer = auth_checkers(svc)
     app = FastAPI(title="Live caption display")
-    app.include_router(create_router(store, Broker(), check_auth,
-                                     config.SSE_KEEPALIVE_SECONDS, config.TRANSCRIPT_PATH))
+    app.include_router(create_router(store, Broker(config.SSE_QUEUE_MAX), check_platform, check_viewer,
+                                     config.SSE_KEEPALIVE_SECONDS, config.TRANSCRIPT_PATH,
+                                     signature_verifier(svc)))
 
     @app.get("/captions", response_class=HTMLResponse)
     async def captions(request: Request):
-        if not check_auth(dict(request.headers)):  # same credentials as the transcript itself
+        headers = dict(request.headers)  # the viewer login is enough: the page only reads
+        if not (check_viewer(headers) or check_platform(headers)):
             raise HTTPException(401, headers={"WWW-Authenticate": "Basic"})
         return captions_page()
 
