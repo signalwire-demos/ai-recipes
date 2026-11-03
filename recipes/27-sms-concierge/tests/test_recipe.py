@@ -1,10 +1,13 @@
 """Shared tools (concierge.py) behave identically from both entry points; the /sms
 webhook drives the AI Chat service with the same agent's URL; governance on the SWML."""
+import hashlib
+import hmac
 import json
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlencode
 
 import pytest
 
@@ -38,6 +41,27 @@ def requests_file(tmp_path, monkeypatch):
     path = tmp_path / "requests.json"
     monkeypatch.setattr(config, "REQUESTS_FILE", path)
     return path
+
+
+KEY, BASE = "PSK_test", "https://hotel.example.com"
+
+
+@pytest.fixture(autouse=True)
+def signing_key(monkeypatch):
+    monkeypatch.setattr(config, "SIGNING_KEY", KEY)
+    monkeypatch.setattr(config, "PUBLIC_URL", BASE)
+
+
+def post_sms(client, json_body=None, form=None, signature=None):
+    """POST /sms with the raw body signed like SignalWire does (hex HMAC-SHA1 of URL + body)."""
+    if json_body is not None:
+        raw, ctype = json.dumps(json_body), "application/json"
+    else:
+        raw, ctype = urlencode(form), "application/x-www-form-urlencoded"
+    if signature is None:
+        signature = hmac.new(KEY.encode(), (BASE + config.SMS_ROUTE + raw).encode(), hashlib.sha1).hexdigest()
+    headers = {"content-type": ctype, "X-SignalWire-Signature": signature}
+    return client.post(config.SMS_ROUTE, content=raw, headers=headers)
 
 
 @pytest.fixture
@@ -121,7 +145,7 @@ def test_request_before_verification_is_refused(agent, requests_file):
 
 def test_swml_webhook_payload_chats_and_replies_with_messaging_swml(client, fake, agent):
     body = {"message": {"from": "+15550142", "to": "+15550100", "body": "When is the pool open?"}}
-    r = client.post(config.SMS_ROUTE, json=body)
+    r = post_sms(client, json_body=body)
     assert r.json() == {"version": "1.0.0", "sections": {"main": [{"reply": fake.reply}]}}
     [turn] = fake.calls
     assert turn["id"] == "sms.15550142" and turn["message"] == "When is the pool open?"
@@ -129,7 +153,7 @@ def test_swml_webhook_payload_chats_and_replies_with_messaging_swml(client, fake
 
 
 def test_laml_form_payload_replies_with_cxml(client, fake):
-    r = client.post(config.SMS_ROUTE, data={"From": "+15550142", "To": "+15550100", "Body": "hi"})
+    r = post_sms(client, form={"From": "+15550142", "To": "+15550100", "Body": "hi"})
     assert r.headers["content-type"].startswith("application/xml")
     assert f"<Message>{fake.reply}</Message>" in r.text
     assert fake.calls[0]["id"] == "sms.15550142"
@@ -139,15 +163,15 @@ def test_laml_form_payload_replies_with_cxml(client, fake):
 def test_texts_from_our_own_number_get_no_reply(client, fake, monkeypatch, sender, to):
     # Live in recipe 29: a number texting itself looped, each reply arriving as a new inbound text.
     monkeypatch.setattr(config, "SMS_NUMBER", "+15550188")
-    r = client.post(config.SMS_ROUTE, data={"From": sender, "To": to, "Body": "hi"})
+    r = post_sms(client, form={"From": sender, "To": to, "Body": "hi"})
     assert r.status_code == 200 and "<Message>" not in r.text
-    r = client.post(config.SMS_ROUTE, json={"message": {"from": sender, "to": to, "body": "hi"}})
+    r = post_sms(client, json_body={"message": {"from": sender, "to": to, "body": "hi"}})
     assert r.json()["sections"]["main"] == []
     assert fake.calls == []
 
 
 def test_empty_text_is_not_sent_to_the_agent(client, fake):
-    r = client.post(config.SMS_ROUTE, json={"message": {"from": "+15550142", "body": ""}})
+    r = post_sms(client, json_body={"message": {"from": "+15550142", "body": ""}})
     assert "as text" in r.text and fake.calls == []
 
 
@@ -157,9 +181,32 @@ def test_busy_conversation_gets_a_holding_reply():
     assert "still working" in asyncio.run(agent.answer("+15550142", "hello?"))
 
 
-def test_signature_required_when_signing_key_set(client, monkeypatch):
-    monkeypatch.setattr(config, "SIGNING_KEY", "PSK_test")
+# --- /sms signature: a forged From must never reach a guest's conversation ------
+
+FORGED = {"message": {"from": "+15550142", "to": "+15550100", "body": "What room am I in?"}}
+
+
+@pytest.mark.parametrize("signature", ["", "0" * 40])
+def test_unsigned_or_badly_signed_sms_is_refused(client, fake, signature):
+    assert post_sms(client, json_body=FORGED, signature=signature).status_code == 403
+    form = {"From": "+15550142", "To": "+15550100", "Body": "hi"}
+    assert post_sms(client, form=form, signature=signature).status_code == 403
+    assert fake.calls == []  # the guest's conversation was never touched
+
+
+def test_signed_sms_for_another_body_is_refused(client, fake):
+    good = post_sms(client, json_body=FORGED).request.headers["X-SignalWire-Signature"]
+    tampered = {"message": {**FORGED["message"], "from": "+15550199"}}
+    assert post_sms(client, json_body=tampered, signature=good).status_code == 403
+    assert [c["id"] for c in fake.calls] == ["sms.15550142"]
+
+
+def test_no_signing_key_refuses_every_sms(client, fake, monkeypatch):
+    # The old default: a blank key meant "don't check". Now it means "/sms is closed".
+    monkeypatch.setattr(config, "SIGNING_KEY", "")
+    assert client.post(config.SMS_ROUTE, json=FORGED).status_code == 403
     assert client.post(config.SMS_ROUTE, data={"From": "+15550142", "Body": "hi"}).status_code == 403
+    assert fake.calls == []
 
 
 def test_conversation_id_is_stable_and_safe():
