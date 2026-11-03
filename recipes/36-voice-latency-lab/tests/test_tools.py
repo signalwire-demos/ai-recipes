@@ -98,3 +98,18 @@ def test_governance_step_tools_and_post_prompt(dumps):
     step = ai["prompt"]["contexts"]["default"]["steps"][0]
     assert step["functions"] == ["check_hours"] and step["valid_steps"] == []
     assert "post_prompt_url" in ai  # without it there is no timing payload to measure
+
+
+def test_governance_check_hours_schema_is_typed_and_asks(dumps):
+    ai = dumps[app.DEFAULT_CONFIG]  # test_governance_everything_else_is_identical covers the rest
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "check_hours")
+    props = fn["parameters"]["properties"]
+    assert props["day"]["enum"] == app.DAYS  # the same list the handler checks
+    assert set(fn["parameters"]["required"]) == set(props)
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
+
+
+def test_governance_answer_step_asks_for_the_day(dumps):
+    text = dumps[app.DEFAULT_CONFIG]["prompt"]["contexts"]["default"]["steps"][0]["text"].lower()
+    assert "ask which day" in text and "never assume today" in text
