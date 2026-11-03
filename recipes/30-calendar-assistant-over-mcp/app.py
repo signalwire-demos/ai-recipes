@@ -47,11 +47,14 @@ class CalendarAgent(AgentBase):
             f"You book and move appointments for {config.BUSINESS_NAME} by phone. Be brief.",
         )
         self.prompt_add_section("Rules", bullets=[
-            "Call get_today first so you can turn 'next Tuesday' into a date.",
             "Ask for the caller's full name before anything else.",
-            "To book: find_free_slots for the date, offer at most three times, then book_meeting.",
-            "To move: find_my_meetings with the caller's name, confirm which one, "
-            "find_free_slots, then move_meeting.",
+            "Ask the caller which day they want. Never assume today. Use get_today only to turn a "
+            "relative day like 'next Tuesday' into YYYY-MM-DD.",
+            "Ask what the visit is for before booking.",
+            "To book: ask for the day, then find_free_slots for that date, offer at most three times, "
+            "ask which one, then book_meeting.",
+            "To move: find_my_meetings with the caller's name, confirm which one, ask for the new day, "
+            "then find_free_slots for it, offer at most three times, ask which one, then move_meeting.",
             "Read back the result the tool gives you. If a tool says a slot is taken, offer another.",
             "You can't cancel meetings by phone. Offer to move the meeting instead.",
         ])
