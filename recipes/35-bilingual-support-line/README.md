@@ -22,8 +22,14 @@ whatever language the call is in, so the same handler serves both languages.
 The tools are still scoped by step. `identify` exposes only `lookup_account` and has
 `valid_steps=[]`, so the account tools don't exist until the handler verifies the caller and
 calls `swml_change_step("help")`. The handler copies only `first_name` and `plan` into
-`global_data`: the internal risk flag and billing notes never reach the model. `check_outage`
-and `get_balance` read the account from `global_data`, never from model arguments.
+`global_data`, for the prompt: the internal risk flag and billing notes never reach the model.
+It records the verified account on the server, keyed by `call_id` (`lockout.py`, `Sessions`,
+expiring after `VERIFIED_SESSION_SECS`). `check_outage` and `get_balance` read the account only
+from that record, never from model arguments or from request `global_data`, which a forged tool
+request could fill in. Failed
+lookups count on the server (`lockout.py`) per account number, caller ID and call, across calls:
+after `MAX_LOOKUP_FAILURES` (3) the handler answers `locked_try_later` for that account or phone
+until `LOOKUP_LOCKOUT_SECS` (15 minutes) after the last failure, so redialing doesn't reset it.
 
 ```mermaid
 stateDiagram-v2
@@ -45,6 +51,7 @@ stateDiagram-v2
 | Language-neutral JSON tool results | `app.py`, `data()` helper used by every handler |
 | `set_functions`, `set_valid_steps([])` | `app.py`, steps `identify`, `help`, `wrap_up` |
 | `update_global_data` + `swml_change_step` | `app.py`, `lookup_account` handler |
+| Server-side lookup failure count and lockout | `lockout.py`, used by `lookup_account` |
 
 ## Prerequisites
 
@@ -83,7 +90,7 @@ swaig-test app.py --list-tools
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.languages'
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
 swaig-test app.py --exec lookup_account --account_number 100877 --zip 74103
-swaig-test app.py --custom-data '{"global_data": {"account_id": "100877"}}' --exec check_outage
+swaig-test app.py --custom-data '{"global_data": {"account_id": "100877"}}' --exec check_outage  # not_verified: global_data is not proof
 ```
 
 On the call, try: "Hi, my account is 100877, ZIP 74103." Then switch: "¿Hay un apagón en mi
@@ -97,8 +104,9 @@ docker compose up --build          # reads .env, serves on :3000
 ```
 
 Put it behind any HTTPS host and point the number at `https://USER:PASS@<host>/`.
-Serverless: the agent is stateless (the mock data is read-only), so `agent.run()` works
-unchanged on AWS Lambda or Google Cloud Functions (see the SDK's `lambda_agent.py` example).
+Serverless: the mock data is read-only, but the lookup failure counts and verified calls
+(`lockout.py`) are in-process memory. Move them to shared storage (Redis, your database) before running on AWS
+Lambda, Google Cloud Functions or more than one replica, or each instance counts on its own.
 
 ## What to change first
 
@@ -106,4 +114,5 @@ Open `config.py`. To add a language, append one dict to `LANGUAGES` (name, ASR c
 speech fillers, function fillers, step fillers): that is one more `add_language()` call and
 nothing else changes, because no handler holds any text. Pick a voice that speaks the
 language. Then point `ACCOUNTS_FILE` at your own data, or replace `load_db()` in `app.py` with
-calls to your billing and outage systems. Keep the handlers returning data, not sentences.
+calls to your billing and outage systems. Keep the handlers returning data, not sentences. `MAX_LOOKUP_FAILURES` and
+`LOOKUP_LOCKOUT_SECS` set the lookup lockout.

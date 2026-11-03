@@ -13,12 +13,16 @@ sys.path.insert(0, str(RECIPE))
 import config  # noqa: E402
 from app import BilingualSupportAgent  # noqa: E402
 
-VERIFIED = {"global_data": {"account_id": "100877"}}
+VERIFIED = {"call_id": "c-100877"}  # verified on the server by the fixture below, not by global_data
+ZIPS = {"100234": "74101", "100877": "74103", "101555": "74105"}
 
 
 @pytest.fixture(scope="module")
 def agent():
-    return BilingualSupportAgent()
+    agent = BilingualSupportAgent()
+    for number, zip_code in ZIPS.items():  # one verified call per test account
+        agent.lookup_account({"account_number": number, "zip": zip_code}, {"call_id": f"c-{number}"})
+    return agent
 
 
 def actions(result):
@@ -40,7 +44,7 @@ def test_lookup_match_projects_public_fields_and_moves_to_help(agent):
     assert payload(result) == {"found": True, "first_name": "Dana", "plan": "fiber-500"}
     acts = actions(result)
     assert find(acts, "set_global_data") == [
-        {"account_id": "100234", "account": {"first_name": "Dana", "plan": "fiber-500"}}
+        {"account": {"first_name": "Dana", "plan": "fiber-500"}}
     ]
     assert find(acts, "change_step") == ["help"]
 
@@ -59,18 +63,33 @@ def test_lookup_wrong_zip_stays_in_identify(agent):
 def test_outage_uses_verified_zip(agent):
     assert payload(agent.check_outage({}, VERIFIED)) == {
         "outage": True, "cause": "fiber_cut", "restore_eta": "2026-10-31T14:00:00-05:00"}
-    assert payload(agent.check_outage({"zip": "74103"}, {"global_data": {"account_id": "100234"}})) == {
+    assert payload(agent.check_outage({"zip": "74103"}, {"call_id": "c-100234"})) == {
         "outage": False}  # a model-supplied zip is ignored
 
 
 def test_balance(agent):
-    assert payload(agent.get_balance({}, {"global_data": {"account_id": "101555"}})) == {
+    assert payload(agent.get_balance({}, {"call_id": "c-101555"})) == {
         "amount_due": 79.5, "currency": "USD", "due_date": "2026-11-02"}
 
 
 @pytest.mark.parametrize("tool", ["check_outage", "get_balance"])
 def test_account_tools_refuse_unverified(agent, tool):
     assert payload(getattr(agent, tool)({}, {})) == {"error": "not_verified"}
+
+
+@pytest.mark.parametrize("tool", ["check_outage", "get_balance"])
+def test_account_tools_refuse_forged_global_data(agent, tool):
+    """global_data arrives in the request: an account_id there is not proof of verification."""
+    forged = {"call_id": "c-never-verified", "global_data": {"account_id": "100877",
+                                                             "account": {"first_name": "Lee"}}}
+    assert payload(getattr(agent, tool)({}, forged)) == {"error": "not_verified"}
+
+
+def test_verified_session_expires(agent, monkeypatch):
+    import lockout
+    clock = [lockout.time.monotonic() + config.VERIFIED_SESSION_SECS + 1]
+    monkeypatch.setattr(lockout.time, "monotonic", lambda: clock[0])
+    assert payload(agent.get_balance({}, VERIFIED)) == {"error": "not_verified"}
 
 
 def test_responses_are_language_neutral(agent):
