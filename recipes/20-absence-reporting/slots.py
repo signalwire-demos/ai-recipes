@@ -32,6 +32,11 @@ def today() -> date:
 
 def parse_date(phrase: str) -> tuple[str | None, str | None]:
     """Return (ISO date, None) or (None, the question to ask the caller)."""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", phrase.strip()):      # a model that normalized anyway
+        try:
+            return date.fromisoformat(phrase.strip()).isoformat(), None
+        except ValueError:
+            return None, "that date doesn't exist. Which date?"
     now = today()
     s = re.sub(r"[^a-z0-9 ]", " ", phrase.lower().replace("'", "").replace("-", " "))
     s = re.sub(r"\b(\d+)(st|nd|rd|th)\b", r"\1", " ".join(s.split()))
@@ -63,7 +68,11 @@ def parse_date(phrase: str) -> tuple[str | None, str | None]:
 
 
 def one_of(*choices):
-    return lambda raw: (raw, None) if raw in choices else (None, f"choose {' or '.join(choices)}")
+    """A fixed choice set. `check.choices` becomes the enum in the tool schema (app.py)."""
+    def check(raw):
+        return (raw, None) if raw in choices else (None, f"choose {' or '.join(choices)}")
+    check.choices = choices
+    return check
 
 
 def matches(pattern: str, hint: str, fmt=str):

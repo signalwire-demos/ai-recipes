@@ -135,9 +135,18 @@ def test_correction_in_confirm_updates_the_summary(agent):
     ("the third of November", "2026-11-03"), ("11/13", "2026-11-13"),
     ("November two", "2026-11-02"), ("twenty one twelve", "2026-12-21"),
     ("November second twenty twenty six", "2026-11-02"), ("thirty one december", "2026-12-31"),
+    ("2026-11-05", "2026-11-05"),   # a model that normalized anyway: pass ISO straight through
 ])
 def test_dates(phrase, expected):
     assert slots.parse_date(phrase) == (expected, None)
+
+
+def test_iso_date_from_the_model_is_accepted_and_checked(agent):
+    """Audit 2026-11-03: `--start_date 2026-11-05` got "which date?" back, so a model that
+    normalized the date looped on a question the caller had already answered."""
+    r = agent.record_slots({"start_date": "2026-11-05"}, {"global_data": {"absence": {}}})
+    assert saved(r)["start_date"] == "2026-11-05"
+    assert slots.parse_date("2026-02-30") == (None, "that date doesn't exist. Which date?")
 
 
 # --- submit_report ----------------------------------------------------------
@@ -189,6 +198,18 @@ def test_governance_every_slot_is_optional_in_the_tool_schema(ai):
     fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "record_slots")
     assert set(fn["parameters"]["properties"]) == set(config.SLOTS)
     assert not fn["parameters"].get("required")
+
+
+def test_governance_record_slots_schema_has_enum_and_asks(ai):
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "record_slots")
+    props = fn["parameters"]["properties"]
+    # the enum is the one_of choices the handler checks, and only that slot has one
+    assert props["org_type"]["enum"] == list(config.SLOTS["org_type"][1].choices) == ["school", "work"]
+    assert [name for name, p in props.items() if "enum" in p] == ["org_type"]
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
+    for name in ("start_date", "end_date"):
+        assert "never convert to YYYY-MM-DD" in props[name]["description"]
 
 
 def test_governance_done_is_terminal(steps):
