@@ -41,7 +41,6 @@ stateDiagram-v2
 |---|---|
 | `add_language` (voice + speech/function fillers per language) | `app.py`, `__init__`, one call per `config.LANGUAGES` entry |
 | `add_internal_filler("next_step", code, ...)` | `app.py`, `__init__`, per language |
-| `set_params({"languages_enabled": True})` | `app.py`, `__init__` |
 | Language-neutral JSON tool results | `app.py`, `data()` helper used by every handler |
 | `set_functions`, `set_valid_steps([])` | `app.py`, steps `identify`, `help`, `wrap_up` |
 | `update_global_data` + `swml_change_step` | `app.py`, `lookup_account` handler |

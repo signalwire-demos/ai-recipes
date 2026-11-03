@@ -6,6 +6,6 @@ language: python
 difficulty: beginner
 size: S
 status: ready
-primitives: [add_language, languages_enabled, internal-fillers, contexts-steps, set_functions, valid_steps, swml_change_step, global_data]
+primitives: [add_language, internal-fillers, contexts-steps, set_functions, valid_steps, swml_change_step, global_data]
 channels: [voice]
 external: []

@@ -51,7 +51,7 @@ Don't edit it by hand.
 | 32 | [AI Order Status Line](recipes/32-order-status-line/) | D | M | ready | voice | contexts-steps, set_functions, valid_steps, swml_change_step, global_data, connect, data-projection |
 | 33 | [AI Answering Service for Agencies](recipes/33-agency-answering-service/) | D | L | ready | voice | dynamic-config, define_tool, add_swaig_query_params, global_data, connect, tenant-yaml |
 | 34 | [AI Stock Quote Line](recipes/34-stock-quote-line/) | D | M | ready | voice | custom-skill, add_skill, add_skill_directory, agent-server |
-| 35 | [AI Bilingual Support Line](recipes/35-bilingual-support-line/) | D | S | ready | voice | add_language, languages_enabled, internal-fillers, contexts-steps, set_functions, valid_steps, swml_change_step, global_data |
+| 35 | [AI Bilingual Support Line](recipes/35-bilingual-support-line/) | D | S | ready | voice | add_language, internal-fillers, contexts-steps, set_functions, valid_steps, swml_change_step, global_data |
 | 36 | [AI Voice Latency Lab](recipes/36-voice-latency-lab/) | D | L | confirm | voice | dynamic-config, set_prompt_llm_params, add_language, post_prompt, contexts-steps, set_functions, valid_steps, global_data |
 | — | [Recipe Template (Office Hours Line)](recipes/_template/) | A | S | template | voice | contexts-steps, set_functions, valid_steps, swml_change_step, global_data |
 <!-- recipes:end -->

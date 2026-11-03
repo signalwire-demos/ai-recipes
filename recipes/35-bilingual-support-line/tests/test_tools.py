@@ -119,7 +119,6 @@ def test_swml_has_both_languages_with_their_own_voices_and_fillers(swml):
     assert langs["en-US"]["voice"] != langs["es"]["voice"]
     assert "Un momento, lo reviso." in langs["es"]["function_fillers"]
     assert "One moment while I check." in langs["en-US"]["function_fillers"]
-    assert ai_of(swml)["params"]["languages_enabled"] is True
 
 
 def test_swml_languages_match_config(swml):

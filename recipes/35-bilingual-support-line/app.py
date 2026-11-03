@@ -35,7 +35,6 @@ class BilingualSupportAgent(AgentBase):
                               speech_fillers=lang["speech_fillers"],
                               function_fillers=lang["function_fillers"])
             self.add_internal_filler("next_step", lang["code"], lang["step_fillers"])
-        self.set_params({"languages_enabled": True})
 
         names = " and ".join(lang["name"] for lang in config.LANGUAGES)
         self.prompt_add_section(
