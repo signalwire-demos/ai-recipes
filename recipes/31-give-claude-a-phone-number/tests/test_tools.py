@@ -5,6 +5,7 @@ FastAPI app `python app.py` serves, so /mcp auth and routing are the real ones.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -19,10 +20,12 @@ RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
 
 import config  # noqa: E402
-from app import PhoneAgent  # noqa: E402
+from app import PhoneAgent, callback_window_text  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
 AUTH = ("tester", "test-pass")
+# Values the caller gives on the phone. account_id comes from global_data, never the caller.
+CALLER_SUPPLIED = [("lookup_customer", "phone"), ("book_callback", "when"), ("book_callback", "reason")]
 FUTURE_SLOT = "2030-01-07 10:30"   # a Monday, inside callback hours
 
 
@@ -185,3 +188,36 @@ def test_governance_steps_scope_the_voice_tools(swml):
     assert steps["identify"]["valid_steps"] == []
     assert "lookup_customer" not in steps["help"]["functions"]
     assert set(steps["help"]["functions"]) == {"book_callback", "transfer_to_human"}
+
+
+def test_governance_tool_schemas_are_typed_and_ask(swml):
+    props = {f["function"]: f["parameters"]["properties"] for f in ai_of(swml)["SWAIG"]["functions"]}
+    when, phone = props["book_callback"]["when"], props["lookup_customer"]["phone"]
+    assert re.fullmatch(when["pattern"], FUTURE_SLOT)
+    for loose in ("next tuesday", "2030-01-07 2:30", "2030-01-07"):
+        assert not re.fullmatch(when["pattern"], loose), loose
+    assert "24-hour" in when["description"] and "never assume today" in when["description"]
+    for ok in ("5555550101", "15555550101", "+15555550101"):
+        assert re.fullmatch(phone["pattern"], ok), ok
+    assert not re.fullmatch(phone["pattern"], "(555) 555-0101")
+    assert "never use the caller ID" in phone["description"]
+    for tool, name in CALLER_SUPPLIED:
+        desc = props[tool][name]["description"].lower()
+        assert "ask" in desc, f"{tool}.{name}: the description must tell the model to ask"
+    assert "lookup_customer" in props["book_callback"]["account_id"]["description"]
+
+
+def test_governance_help_step_states_the_window_and_asks_for_the_slot(swml):
+    text = next(s for s in ai_of(swml)["prompt"]["contexts"]["default"]["steps"] if s["name"] == "help")["text"]
+    start, end = config.CALLBACK_HOURS
+    assert callback_window_text() == f"Callbacks run Monday to Friday, {start}:00 to {end}:00 local time."
+    assert text.startswith(callback_window_text())
+    assert "ask for the day and then the time, one at a time" in text
+    assert "never assume today or pick a slot yourself" in text
+
+
+def test_governance_mcp_serves_the_same_schemas_as_voice(client, swml):
+    over_mcp = {t["name"]: t["inputSchema"] for t in rpc(client, "tools/list").json()["result"]["tools"]}
+    voice = {f["function"]: f["parameters"] for f in ai_of(swml)["SWAIG"]["functions"]}
+    for name in config.MCP_TOOLS:
+        assert over_mcp[name] == voice[name], name   # same patterns and "ask" text on both channels
