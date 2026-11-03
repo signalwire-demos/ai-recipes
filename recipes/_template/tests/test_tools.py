@@ -95,3 +95,14 @@ def test_governance_check_hours_schema_is_typed_and_asks(swml):
     assert set(fn["parameters"]["required"]) == set(props)
     for name, prop in props.items():
         assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
+
+
+@pytest.mark.parametrize("password, refused", [("change-me", True), (" change-me ", True),
+                                               ("a-long-random-value", False)])
+def test_refuses_to_start_with_the_placeholder_password(tmp_path, password, refused):
+    env = {"PATH": "/usr/bin:/bin", "SWML_BASIC_AUTH_PASSWORD": password,
+           "RECIPES_ENV_FILE": str(tmp_path / "none.env")}
+    run = subprocess.run([sys.executable, "-c", "import config"], cwd=RECIPE, env=env,
+                         capture_output=True, text=True)
+    assert (run.returncode != 0) is refused
+    assert ("placeholder" in run.stderr) is refused
