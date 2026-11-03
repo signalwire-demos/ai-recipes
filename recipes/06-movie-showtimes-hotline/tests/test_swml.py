@@ -147,3 +147,11 @@ def test_raw_url_points_at_the_committed_feed():
 def test_prompt_forbids_guessing(ai):
     assert "Never guess" in ai["prompt"]["text"]
     assert "Starlight Cinema" in ai["prompt"]["text"]
+
+
+def test_governance_listing_is_today_only_with_no_day_parameter(ai, get_showtimes):
+    # The feed is today-only and the tool has no parameter to carry a day, so the prompt
+    # must decline other days rather than read today's list as Saturday's.
+    text = " ".join(ai["prompt"]["text"].split())
+    assert "any day other than today" in text
+    assert get_showtimes["parameters"]["properties"] == {}
