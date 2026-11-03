@@ -14,7 +14,7 @@ RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
 
 import config  # noqa: E402
-from app import DriveThruAgent  # noqa: E402
+from app import MENU, DriveThruAgent  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -186,13 +186,22 @@ def test_change_order_goes_back(agent):
 # --- governance: read the SWML exactly as swaig-test dumps it ----------------------
 
 @pytest.fixture(scope="module")
-def steps():
+def ai():
     local = Path(sys.executable).with_name("swaig-test")
     exe = str(local) if local.exists() else (shutil.which("swaig-test") or "swaig-test")
     out = subprocess.run([exe, str(RECIPE / "app.py"), "--dump-swml", "--raw"],
                          capture_output=True, text=True, check=True, cwd=RECIPE).stdout
-    ai = next(v["ai"] for v in json.loads(out)["sections"]["main"] if "ai" in v)
+    return next(v["ai"] for v in json.loads(out)["sections"]["main"] if "ai" in v)
+
+
+@pytest.fixture(scope="module")
+def steps(ai):
     return {s["name"]: s for s in ai["prompt"]["contexts"]["default"]["steps"]}
+
+
+@pytest.fixture(scope="module")
+def tools(ai):
+    return {f["function"]: f["parameters"] for f in ai["SWAIG"]["functions"]}
 
 
 def test_governance_substitute_offer_cannot_add_items(steps):
@@ -217,3 +226,40 @@ def test_governance_done_is_terminal(steps):
     # loop on it (seen live in #7, #10, #12, #13). The last step ends the flow.
     final = steps["done"]
     assert final["functions"] == [] and final["valid_steps"] == [] and final["end"] is True
+
+
+def test_governance_add_item_enums_come_from_menu_and_ask(tools):
+    schema = tools["add_item"]
+    props = schema["properties"]
+    assert schema["required"] == ["item"]
+    assert props["item"]["enum"] == list(MENU)
+    assert props["size"]["enum"] == sorted({s for v in MENU.values() for s in v["sizes"]})
+    assert props["modifiers"]["items"]["enum"] == sorted({m for v in MENU.values() for m in v["modifiers"]})
+    assert props["side"]["enum"] == ["fries", "onion_rings"] and props["drink"]["enum"] == ["milkshake", "soda"]
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
+    for name in ("size", "side", "drink"):
+        assert "never assume" in props[name]["description"]
+
+
+def test_governance_modify_item_omitted_fields_keep_current(tools):
+    schema = tools["modify_item"]
+    props = schema["properties"]
+    assert schema["required"] == ["line"]
+    assert props["size"]["enum"] == tools["add_item"]["properties"]["size"]["enum"]
+    for name in ("add_modifiers", "remove_modifiers"):
+        assert props[name]["items"]["enum"] == tools["add_item"]["properties"]["modifiers"]["items"]["enum"]
+    for name in ("size", "quantity"):
+        assert "Omit to keep the current" in props[name]["description"]
+    assert "Default" not in props["quantity"]["description"]
+
+
+def test_governance_accept_substitute_asks_for_an_offered_option(tools):
+    desc = tools["accept_substitute"]["properties"]["choice"]["description"]
+    assert "pending.options" in desc and "ask" in desc.lower()
+
+
+def test_governance_take_order_step_asks_and_never_assumes(steps):
+    text = steps["take_order"]["text"]
+    assert "ask for anything the caller has not said" in text
+    assert "Never fill in a size, side or drink the caller did not give" in text
