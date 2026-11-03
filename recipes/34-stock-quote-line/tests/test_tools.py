@@ -73,12 +73,17 @@ def test_parameter_schema():
     assert schema["provider"]["enum"] == ["mock", "alphavantage", "finnhub"]
     assert schema["api_key"]["hidden"] is True
     assert schema["tool_name"]["default"] == "get_stock_quote"
+    assert schema["watchlist"]["items"] == {"type": "string"}
 
 
 def test_skill_registers_its_tool_with_the_right_schema():
     fn = tool(QuoteLineAgent(), "get_stock_quote")
-    assert fn.parameters == {"ticker": {"type": "string", "description": "Ticker symbol, e.g. ACME"}}
+    ticker = fn.parameters["ticker"]
+    assert ticker["pattern"] == sq.TICKER.pattern == "^[A-Z][A-Z.]{0,5}$"   # schema and handler agree
+    assert "enum" not in ticker and "ask" in ticker["description"].lower()
     assert fn.required == ["ticker"]
+    desk = tool(StockPlanAgent(), "get_company_share_price").parameters["ticker"]
+    assert desk["enum"] == ["ACME"] and "ACME" in desk["description"] and "ask" in desk["description"].lower()
 
 
 def test_paid_provider_without_key_fails_loudly():
@@ -184,6 +189,22 @@ def functions(swml_doc):
 def test_governance_each_agent_gets_only_its_own_tool():
     assert functions(dump()) == ["get_stock_quote"]
     assert functions(dump("--agent-class", "StockPlanAgent")) == ["get_company_share_price"]
+
+
+def ai_of(swml_doc):
+    return next(v["ai"] for v in swml_doc["sections"]["main"] if "ai" in v)
+
+
+def test_governance_ticker_schema_is_typed_and_asks_and_stock_plan_names_its_ticker():
+    quote, plan = ai_of(dump()), ai_of(dump("--agent-class", "StockPlanAgent"))
+    for ai, name in ((quote, "get_stock_quote"), (plan, "get_company_share_price")):
+        fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == name)
+        ticker = fn["parameters"]["properties"]["ticker"]
+        assert ticker["pattern"] == "^[A-Z][A-Z.]{0,5}$" and fn["parameters"]["required"] == ["ticker"]
+        assert "ask" in ticker["description"].lower(), f"{name}.ticker: the description must tell the model to ask"
+    assert "enum" not in quote["SWAIG"]["functions"][0]["parameters"]["properties"]["ticker"]
+    assert plan["SWAIG"]["functions"][0]["parameters"]["properties"]["ticker"]["enum"] == ["ACME"]
+    assert "quotes only ACME" in json.dumps(plan["prompt"]) and "quotes only" not in json.dumps(quote["prompt"])
 
 
 def test_governance_api_key_never_reaches_the_swml():
