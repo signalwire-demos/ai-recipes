@@ -200,10 +200,15 @@ def swaig_test_bin() -> str:
 
 
 @pytest.fixture(scope="module")
-def steps():
+def swml():
     out = subprocess.run([swaig_test_bin(), str(RECIPE / "app.py"), "--dump-swml", "--raw"],
                          capture_output=True, text=True, check=True, cwd=RECIPE).stdout
-    return {s["name"]: s for s in ai_of(json.loads(out))["prompt"]["contexts"]["default"]["steps"]}
+    return json.loads(out)
+
+
+@pytest.fixture(scope="module")
+def steps(swml):
+    return {s["name"]: s for s in ai_of(swml)["prompt"]["contexts"]["default"]["steps"]}
 
 
 def test_governance_only_verify_guest_before_verification(steps):
@@ -212,3 +217,18 @@ def test_governance_only_verify_guest_before_verification(steps):
 
 def test_governance_concierge_tools(steps):
     assert steps["concierge"]["functions"] == ["amenity_hours", "request_service"]
+
+
+def test_governance_tool_schemas_are_typed_and_ask(swml):
+    fns = {f["function"]: f["parameters"] for f in ai_of(swml)["SWAIG"]["functions"]}
+    assert fns["verify_guest"]["properties"]["room"]["pattern"] == "^[0-9]{1,5}$"
+    amenities = list(json.loads(config.AMENITIES_FILE.read_text()))  # the keys the handler looks up
+    assert fns["amenity_hours"]["properties"]["amenity"]["enum"] == amenities
+    assert fns["request_service"]["properties"]["service"]["enum"] == list(config.SERVICES)
+    for fn, params in fns.items():
+        for name, prop in params["properties"].items():
+            assert "ask" in prop["description"].lower(), f"{fn}.{name}: the description must tell the model to ask"
+
+
+def test_governance_concierge_step_asks_for_the_time_before_logging(steps):
+    assert "ask the guest for the time before calling request_service" in steps["concierge"]["text"]
