@@ -97,6 +97,14 @@ An earlier call, `5f144886-e4b7-4afa-ac7c-74c789de4969`, made before `confirmed`
 `valid_steps=[]` and `end`, had the same result. The model sometimes reads the details back and
 waits for a yes before it calls `book_table`, so a scripted caller should be ready to say yes.
 
+Live call `d68bc7a9-879e-437b-8da8-efb4ce916582` on 2026-11-03 (human caller) found the date trap: the
+caller never gave a date and the agent booked today, because `global_data.today` was in the prompt
+and nothing told the model to ask. Fixed by giving `book_table` a typed schema (`format: date`,
+patterns for `time` and `phone`, every description ending "Ask if not provided") and a step text
+that says "Ask for, one at a time ... never assume the date is today". The platform's parameter
+schema is OpenAI-style JSON Schema with a fixed key set per property; see
+`docs/schema-audit-2026-11-03.md`.
+
 ## Deploy
 
 ```bash
