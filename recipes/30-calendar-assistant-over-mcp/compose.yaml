@@ -7,6 +7,5 @@ services:
     ports:
       - "${PORT:-3000}:3000"
     environment:
-      PORT: "3000"
-      MCP_TOKEN: "${MCP_TOKEN:-change-me-calendar-token}"
+      PORT: "3000"            # MCP_TOKEN comes from .env; there is no default, the app won't start without it
     restart: unless-stopped
