@@ -155,3 +155,13 @@ def test_governance_take_booking_exposes_only_book_table(swml):
 
 def test_governance_book_table_is_the_only_tool(swml):
     assert [f["function"] for f in ai_of(swml)["SWAIG"]["functions"]] == ["book_table"]
+
+
+def test_governance_book_table_schema_is_typed_and_asks(swml):
+    fn = next(f for f in ai_of(swml)["SWAIG"]["functions"] if f["function"] == "book_table")
+    props = fn["parameters"]["properties"]
+    assert props["date"]["format"] == "date"
+    assert "pattern" in props["time"] and "pattern" in props["phone"]
+    assert set(fn["parameters"]["required"]) == set(props)
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"

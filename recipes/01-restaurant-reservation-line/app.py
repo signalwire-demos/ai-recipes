@@ -86,11 +86,12 @@ class ReservationAgent(AgentBase):
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("take_booking") \
             .set_text(
-                "Collect the guest's name, party size, date, time and a callback phone "
-                "number. Convert the date to YYYY-MM-DD and the time to 24-hour HH:MM, "
-                "then call book_table. If book_table says no, tell the caller why and "
-                "ask for something that works. Never say a table is booked until "
-                "book_table has confirmed it."
+                "Ask for, one at a time: the guest's name, the party size, the date, the "
+                "time and a callback phone number. Never fill in a value the caller did "
+                "not give, and never assume the date is today. Convert the date to "
+                "YYYY-MM-DD and the time to 24-hour HH:MM, then call book_table. If "
+                "book_table says no, tell the caller why and ask for something that "
+                "works. Never say a table is booked until book_table has confirmed it."
             ) \
             .set_functions(["book_table"]) \
             .set_valid_steps([])  # no next_step tool: only the handler can leave this step
@@ -111,14 +112,23 @@ class ReservationAgent(AgentBase):
     @AgentBase.tool(
         name="book_table",
         description="Book a table once you have every detail. Returns whether it worked.",
+        # Same JSON Schema as OpenAI tool calling. The platform allows description, enum,
+        # default, nullable, pattern and format (date, time, date_time, email, ...) per
+        # property and nothing else: no minimum/maximum, so the party limit stays in code.
         parameters={
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "Name for the booking"},
-                "party_size": {"type": "integer", "description": "Number of guests"},
-                "date": {"type": "string", "description": "Date as YYYY-MM-DD"},
-                "time": {"type": "string", "description": "Time as 24-hour HH:MM"},
-                "phone": {"type": "string", "description": "Callback phone number"},
+                "name": {"type": "string",
+                         "description": "Name for the booking, as the caller gave it. Ask if not provided."},
+                "party_size": {"type": "integer",
+                               "description": "Number of guests. Ask if not provided."},
+                "date": {"type": "string", "format": "date",
+                         "description": "Reservation date as YYYY-MM-DD, worked out from what the "
+                                        "caller said and today's date. Always ask; never assume today."},
+                "time": {"type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+                         "description": "Seating time as 24-hour HH:MM (7:30 PM is 19:30). Ask if not provided."},
+                "phone": {"type": "string", "pattern": "^\\+?[0-9]{10,15}$",
+                          "description": "Callback phone number, digits only. Ask if not provided."},
             },
             "required": ["name", "party_size", "date", "time", "phone"],
         },
