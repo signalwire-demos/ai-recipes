@@ -4,14 +4,19 @@ Governance point: the account tools do not exist in the model's world until a
 handler unlocks them. `verify_identity` exposes one tool and no navigation
 (valid_steps=[]). Only the verify_identity handler can open `account_menu`, and
 the third failed attempt sends the call to `escalate` whatever the caller says.
+Failures and the verified state live on the server (lockout.py, self.verified), not in
+request-supplied global_data, so a redial or a forged request can't reset or skip them.
 """
 import re
+import threading
+import time
 from datetime import datetime
 
 from signalwire import AgentBase, FunctionResult
 
 import config
 import crm
+from lockout import Lockout, keys_for
 
 DOB_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%B %d %Y", "%b %d %Y", "%d %B %Y"]
 DEFAULT_TRANSACTIONS = 3  # list_transactions when the caller doesn't say how many
@@ -36,6 +41,9 @@ def money(amount: float) -> str:
 class BankBalanceAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="bank-balance-line", route=config.ROUTE, port=config.PORT, **kwargs)
+        self.lockout = Lockout(config.MAX_VERIFY_ATTEMPTS, config.VERIFY_LOCKOUT_SECS)
+        self.verified: dict[str, tuple[str, float]] = {}  # call_id -> (account id, verified at)
+        self._verified_lock = threading.Lock()
         self.add_language("English", config.LANGUAGE_CODE, config.VOICE)
         self.prompt_add_section(
             "Role",
@@ -92,15 +100,24 @@ class BankBalanceAgent(AgentBase):
     def verify_identity(self, args, raw_data):
         number = re.sub(r"\D", "", str(args.get("account_number", "")))
         dob = normalize_dob(args.get("date_of_birth", ""))
+        call_id = str(raw_data.get("call_id") or "")
+        keys = keys_for(number, raw_data)  # per account, caller ID and call, across calls
+        if self.lockout.locked(*keys):  # checked before the CRM, so a lucky guess while locked fails too
+            return FunctionResult("Too many failed attempts. Stop asking for details.").swml_change_step("escalate")
         acct = crm.verify(number, dob) if number and dob else None
-        if acct:
+        if acct and call_id:
+            self.lockout.clear(keys[0], keys[2])  # the caller ID count stays: it guards other accounts
+            now = time.monotonic()
+            with self._verified_lock:  # drop expired calls, then record this one
+                self.verified = {k: v for k, v in self.verified.items() if now - v[1] < config.VERIFIED_SESSION_SECS}
+                self.verified[call_id] = (acct["id"], now)
             return (
                 FunctionResult(f"Verified. Greet {acct['name'].split()[0]} by name and ask what they need.")
                 .update_global_data({"verified": True, "customer": {"id": acct["id"], "name": acct["name"]}})
                 .swml_change_step("account_menu")
             )
 
-        failures = int((raw_data.get("global_data") or {}).get("verify_failures", 0)) + 1
+        failures = self.lockout.fail(*keys)
         result = FunctionResult().update_global_data({"verify_failures": failures})
         if failures >= config.MAX_VERIFY_ATTEMPTS:
             result.set_response("Those details still don't match. Stop asking for them.")
@@ -112,9 +129,12 @@ class BankBalanceAgent(AgentBase):
     # --- account_menu step ---------------------------------------------------
 
     def _account(self, raw_data) -> dict | None:
-        """Defense in depth: handlers re-check verification instead of trusting the step."""
-        gd = raw_data.get("global_data") or {}
-        return crm.get(gd["customer"]["id"]) if gd.get("verified") and gd.get("customer") else None
+        """Defense in depth: handlers re-check verification instead of trusting the step, and
+        read it from the server's record for this call_id, never from request global_data."""
+        with self._verified_lock:
+            account_id, at = self.verified.get(str(raw_data.get("call_id") or ""), ("", 0.0))
+        fresh = account_id and time.monotonic() - at < config.VERIFIED_SESSION_SECS
+        return crm.get(account_id) if fresh else None
 
     @AgentBase.tool(
         name="get_balance",

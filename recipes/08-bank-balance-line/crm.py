@@ -1,8 +1,11 @@
 """Mock core banking, backed by data/accounts.json. Replace verify() with your identity provider."""
 import json
+import threading
 from datetime import datetime, timezone
 
 import config
+
+_dispute_lock = threading.Lock()  # handlers run in a thread pool: count and append as one step
 
 
 def _accounts() -> list[dict]:
@@ -24,9 +27,10 @@ def get(account_id: str) -> dict | None:
 def open_dispute(account_id: str, transaction_id: str, reason: str) -> str:
     config.DISPUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
     path = config.DISPUTES_FILE
-    count = len(path.read_text().splitlines()) if path.exists() else 0
-    ref = f"D-{count + 1:04d}"
-    with path.open("a") as f:
-        f.write(json.dumps({"ref": ref, "account_id": account_id, "transaction_id": transaction_id,
-                            "reason": reason, "opened": datetime.now(timezone.utc).isoformat()}) + "\n")
+    with _dispute_lock:
+        count = len(path.read_text().splitlines()) if path.exists() else 0
+        ref = f"D-{count + 1:04d}"
+        with path.open("a") as f:
+            f.write(json.dumps({"ref": ref, "account_id": account_id, "transaction_id": transaction_id,
+                                "reason": reason, "opened": datetime.now(timezone.utc).isoformat()}) + "\n")
     return ref

@@ -16,10 +16,11 @@ sys.path.insert(0, str(RECIPE))
 
 import config  # noqa: E402
 from app import BankBalanceAgent, normalize_dob  # noqa: E402
+from lockout import Lockout  # noqa: E402
 
 GOOD = {"account_number": "4001 0101", "date_of_birth": "March 14th, 1985"}
 BAD = {"account_number": "40010101", "date_of_birth": "1990-01-01"}
-VERIFIED = {"global_data": {"verified": True, "customer": {"id": "ACC-0101", "name": "Jordan Rivera"}}}
+VERIFIED = {"call_id": "c-verified"}  # verified on the server by the fixture below, not by global_data
 
 
 @pytest.fixture(scope="module")
@@ -30,6 +31,14 @@ def agent():
 @pytest.fixture(autouse=True)
 def tmp_disputes(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DISPUTES_FILE", tmp_path / "disputes.jsonl")
+
+
+@pytest.fixture(autouse=True)
+def fresh_state(agent):
+    """Lockout and verified state are server-side and outlive a call: reset them per test."""
+    agent.lockout = Lockout(config.MAX_VERIFY_ATTEMPTS, config.VERIFY_LOCKOUT_SECS)
+    agent.verified.clear()
+    agent.verify_identity(GOOD, dict(VERIFIED))
 
 
 def actions(result):
@@ -48,7 +57,7 @@ def test_normalize_dob(spoken):
 
 
 def test_successful_verify_sets_global_data_and_changes_step(agent):
-    acts = actions(agent.verify_identity(GOOD, {"global_data": {}}))
+    acts = actions(agent.verify_identity(GOOD, {"call_id": "c-1", "global_data": {}}))
     assert find(acts, "set_global_data") == [
         {"verified": True, "customer": {"id": "ACC-0101", "name": "Jordan Rivera"}}
     ]
@@ -56,7 +65,7 @@ def test_successful_verify_sets_global_data_and_changes_step(agent):
 
 
 def test_failed_verify_does_not_change_step(agent):
-    result = agent.verify_identity(BAD, {"global_data": {}})
+    result = agent.verify_identity(BAD, {"call_id": "c-1", "global_data": {}})
     acts = actions(result)
     assert find(acts, "change_step") == []
     assert find(acts, "set_global_data") == [{"verify_failures": 1}]
@@ -64,12 +73,17 @@ def test_failed_verify_does_not_change_step(agent):
 
 
 def test_second_failure_still_stays(agent):
-    acts = actions(agent.verify_identity(BAD, {"global_data": {"verify_failures": 1}}))
+    agent.verify_identity(BAD, {"call_id": "c-1"})
+    acts = actions(agent.verify_identity(BAD, {"call_id": "c-1"}))
+    assert find(acts, "set_global_data") == [{"verify_failures": 2}]
     assert find(acts, "change_step") == []
 
 
 def test_third_failure_jumps_to_escalate(agent):
-    acts = actions(agent.verify_identity(BAD, {"global_data": {"verify_failures": 2}}))
+    for _ in range(2):
+        agent.verify_identity(BAD, {"call_id": "c-1"})
+    # The counter is the server's: a request claiming zero failures changes nothing.
+    acts = actions(agent.verify_identity(BAD, {"call_id": "c-1", "global_data": {"verify_failures": 0}}))
     assert find(acts, "set_global_data") == [{"verify_failures": 3}]
     assert find(acts, "change_step") == ["escalate"]
 
@@ -79,7 +93,7 @@ def test_three_failures_in_a_row_end_in_escalate(agent):
     steps = []
     for _ in range(3):
         acts = actions(agent.verify_identity({"account_number": "999", "date_of_birth": "nonsense"},
-                                             {"global_data": gd}))
+                                             {"call_id": "c-1", "global_data": gd}))
         gd.update(find(acts, "set_global_data")[0])
         steps += find(acts, "change_step")
     assert steps == ["escalate"]
@@ -88,8 +102,11 @@ def test_three_failures_in_a_row_end_in_escalate(agent):
 # --- account_menu ----------------------------------------------------------
 
 def test_account_tools_refuse_without_verification(agent):
+    forged = {"call_id": "c-unverified",
+              "global_data": {"verified": True, "customer": {"id": "ACC-0101", "name": "Jordan Rivera"}}}
     for call in (agent.get_balance({}, {}),
                  agent.list_transactions({}, {"global_data": {"verified": False}}),
+                 agent.get_balance({}, forged),  # request-supplied global_data is not proof
                  agent.open_dispute({"transaction_id": "T-9001", "reason": "x"}, {})):
         assert call.to_dict()["response"] == "The caller is not verified."
 
