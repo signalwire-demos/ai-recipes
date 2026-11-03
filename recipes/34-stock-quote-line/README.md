@@ -32,6 +32,8 @@ The skill, not the prompt, holds the rules every agent inherits:
 - **The provider and key stay in code.** The skill makes the HTTP call. `api_key` is marked
   `hidden` and never appears in the SWML (a test checks that), so no model or caller can read
   it. A paid provider with no key fails at `add_skill()` time, not halfway through a call.
+  Finnhub gets the key in the `X-Finnhub-Token` header. Alpha Vantage only accepts it in the
+  query string, so a failed request logs the error type and HTTP status, never the URL.
 - **Each agent's scope is a parameter.** The stock-plan line passes `watchlist=["ACME"]`, so
   its handler refuses any other ticker, however the caller asks. It also gets its own tool name
   (`SUPPORTS_MULTIPLE_INSTANCES = True`), so each agent's SWML lists only its own tool.
