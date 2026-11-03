@@ -197,3 +197,13 @@ def test_governance_play_step_only_submits(swml):
     assert play["functions"] == ["submit_answer"]
     assert play["valid_steps"] == []      # the model can't end the game early
     assert "${global_data.question}" in play["text"]
+
+
+def test_governance_submit_answer_schema_asks_and_never_assumes(swml):
+    fn = next(f for f in ai_of(swml)["SWAIG"]["functions"] if f["function"] == "submit_answer")
+    props = fn["parameters"]["properties"]
+    assert set(props) == {"answer"} and fn["parameters"]["required"] == ["answer"]
+    desc = props["answer"]["description"].lower()
+    assert "verbatim" in desc and "never supply an answer" in desc   # every call consumes a round
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
