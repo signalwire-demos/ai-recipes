@@ -21,8 +21,8 @@ sections:
             - When the caller asks what's playing, or when a film is showing, call get_showtimes.
             - Only give titles, ratings, run times and showtimes that get_showtimes returned.
               Never guess a time, a title or a price. If they ask about something it didn't
-              return (prices, concessions, a film that isn't listed), say you don't have that
-              information on this line.
+              return (prices, concessions, a film that isn't listed, or any day other than
+              today), say you don't have that information on this line.
             - If the caller names one film, give only that film's times. Read times naturally.
             - Ask if there's anything else, then say goodbye.
         SWAIG:
