@@ -76,18 +76,29 @@ class Calendar:
 
 
 def _schema(**props):
-    return {"type": "object", "properties": {k: {"type": "string", "description": d} for k, d in props.items()},
+    """One required string property per keyword; the value is its description plus any format/pattern."""
+    return {"type": "object", "properties": {k: {"type": "string", **v} for k, v in props.items()},
             "required": list(props)}
 
 
+# The platform turns each inputSchema into SWAIG parameters, so these use the keys SWAIG allows
+# (format, pattern). Caller-supplied values say what they are, their exact shape, and to ask.
+DATE = {"format": "date",
+        "description": "The day the caller wants, YYYY-MM-DD. Ask if not provided; never assume today."}
+SLOT = {"pattern": r"^\d{4}-\d{2}-\d{2} ([01]\d|2[0-3]):[0-5]\d$",
+        "description": "The free slot the caller chose, YYYY-MM-DD HH:MM, one returned by find_free_slots. "
+                       "Ask if not provided."}
+ATTENDEE = {"description": "Caller's full name exactly as they gave it (same value find_my_meetings uses). "
+                           "Ask if not provided."}
+TITLE = {"description": "Reason for the visit in the caller's words, e.g. Cleaning, Checkup. Ask if not provided."}
+MEETING_ID = {"pattern": r"^[Mm]-\d+$", "description": "Meeting id from find_my_meetings, e.g. M-1001"}
+
 TOOLS = {
-    "find_free_slots": ("List free meeting start times on one date.", _schema(date="YYYY-MM-DD")),
-    "find_my_meetings": ("List one attendee's own meetings with their ids.", _schema(attendee="Caller's full name")),
-    "book_meeting": ("Book a meeting in a free slot.",
-                     _schema(title="What the meeting is about", start="YYYY-MM-DD HH:MM", attendee="Caller's name")),
-    "move_meeting": ("Move an existing meeting to a new free slot.",
-                     _schema(meeting_id="Meeting id, e.g. M-1001", new_start="YYYY-MM-DD HH:MM")),
-    "cancel_meeting": ("Cancel a meeting.", _schema(meeting_id="Meeting id")),
+    "find_free_slots": ("List free meeting start times on one date.", _schema(date=DATE)),
+    "find_my_meetings": ("List one attendee's own meetings with their ids.", _schema(attendee=ATTENDEE)),
+    "book_meeting": ("Book a meeting in a free slot.", _schema(title=TITLE, start=SLOT, attendee=ATTENDEE)),
+    "move_meeting": ("Move an existing meeting to a new free slot.", _schema(meeting_id=MEETING_ID, new_start=SLOT)),
+    "cancel_meeting": ("Cancel a meeting.", _schema(meeting_id=MEETING_ID)),
 }
 
 

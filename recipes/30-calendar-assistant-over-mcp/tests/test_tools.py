@@ -4,6 +4,7 @@ and tools/list with exactly that URL and headers).
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -220,6 +221,35 @@ def test_governance_voice_agent_cannot_cancel(server):
 
 def test_governance_admin_scope_can_cancel(server):
     assert text(call(server, "cancel_meeting", {"meeting_id": "M-1001"}, ADMIN)) == "Cancelled M-1001."
+
+
+def test_governance_rules_ask_for_the_day_and_the_reason(swml):
+    # The prompt never hands the model a ready-made date: it asks which day, and get_today only
+    # resolves a relative day. It also asks what the visit is for, so book_meeting's title is the caller's.
+    prompt = json.dumps(next(v["ai"] for v in swml["sections"]["main"] if "ai" in v)["prompt"])
+    assert "Never assume today" in prompt and "Ask what the visit is for" in prompt
+    assert "Call get_today first" not in prompt
+
+
+def test_governance_calendar_tool_schemas_are_typed_and_ask(server):
+    # The platform turns each MCP inputSchema into SWAIG parameters, so the reference server's
+    # schemas carry the format/pattern keys and "ask" wording a local tool would.
+    tools = {t["name"]: t["inputSchema"] for t in rpc(server, "tools/list", headers=ADMIN).json()["result"]["tools"]}
+    props = {(n, k): p for n, s in tools.items() for k, p in s["properties"].items()}
+    for name, schema in tools.items():
+        assert set(schema["required"]) == set(schema["properties"]), name
+    assert props[("find_free_slots", "date")]["format"] == "date"
+    slot = props[("book_meeting", "start")]["pattern"]
+    assert slot == props[("move_meeting", "new_start")]["pattern"]
+    assert re.fullmatch(slot, f"{DAY} 09:30") and not re.fullmatch(slot, "tomorrow")
+    assert not re.fullmatch(slot, f"{DAY}T09:30") and not re.fullmatch(slot, f"{DAY} 9:30")  # the server's strptime needs HH:MM
+    assert re.fullmatch(props[("move_meeting", "meeting_id")]["pattern"], "M-1001")
+    assert props[("move_meeting", "meeting_id")] == props[("cancel_meeting", "meeting_id")]
+    # The same attendee wording on book and lookup: the server matches the name exactly (lowercased).
+    assert props[("book_meeting", "attendee")] == props[("find_my_meetings", "attendee")]
+    for (name, key), prop in props.items():
+        if key != "meeting_id":  # comes from find_my_meetings, not from the caller
+            assert "ask" in prop["description"].lower(), f"{name}.{key}: the description must tell the model to ask"
 
 
 def test_governance_free_slots_hide_other_peoples_meetings(server):
