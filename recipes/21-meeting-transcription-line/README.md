@@ -19,7 +19,13 @@ The transcript goes to your code first, and the call flow is code, not a prompt.
 `app.py` starts `live_transcribe` straight after `answer`, before the caller hears anything, and
 points its webhook at your own authenticated endpoint. The SWML has no `ai` verb: no model is in
 the call path, and nothing reads the transcript before it lands in your storage. Every consumer
-route needs the same basic auth as the SWML route. All knowledge of the event payload lives in one
+route needs a login, and there are two. The SWML basic auth is the platform's: it alone can POST
+`/transcript`, list every call at `/calls`, and stream all calls from `/events`. The optional
+`VIEWER_USER` / `VIEWER_PASSWORD` login is for transcript viewers: it reads one call it names
+(`/calls/<id>`, `/events?call_id=<id>`) and is refused (403) everywhere else, so a viewer can't
+forge segments or browse other calls. With `SIGNALWIRE_SIGNING_KEY` set, `POST /transcript` also
+needs a valid `X-SignalWire-Signature`. Each SSE subscriber has a bounded queue; one that falls
+`SSE_QUEUE_MAX` segments behind is disconnected. All knowledge of the event payload lives in one
 function, `parse_event()` in `adapter.py`. Every raw body is kept next to the parsed segments.
 
 ```mermaid
@@ -42,6 +48,7 @@ stateDiagram-v2
 | `connect` to a second party (optional) | `app.py`, `build_swml()` |
 | Payload adapter (the one place that knows the event shape) | `adapter.py`, `parse_event()` |
 | Partial/final merge, per-call store, SSE fan-out | `consumer.py`, `merge()`, `TranscriptStore`, `Broker` |
+| Platform vs viewer login, webhook signature | `consumer.py`, `create_router()`; `app.py`, `auth_checkers()`, `signature_verifier()` |
 
 ### The event payload
 
@@ -60,6 +67,9 @@ The `play` greeting is transcribed too, as `local-caller`.
 - `TODO(blocked: conference behavior undocumented)`. The plan calls for a conference. No source
   documents `live_transcribe` on a leg inside `join_conference`, so this version is a single-call
   dial-in. The seam is the `connect` branch in `build_swml()`.
+- Not confirmed live: whether `live_transcribe` webhooks carry `X-SignalWire-Signature`, and
+  whether the signed URL includes the `user:pass@` part (both forms are accepted). Leave
+  `SIGNALWIRE_SIGNING_KEY` blank until a live call shows signed events, or every event gets a 403.
 
 ## Prerequisites
 
@@ -80,6 +90,9 @@ cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL and basic au
 
 Leave `TRANSCRIPT_WEBHOOK_URL` blank to use `PUBLIC_URL/transcript` with your basic auth in the URL
 (the documented `user:pass@host` form). Set it only if events should go to another host.
+Set `VIEWER_USER` / `VIEWER_PASSWORD` to give a transcript viewer a read-only login. Left blank,
+there is no viewer login and only the SWML basic auth can read. A viewer pair equal to the SWML
+basic auth is ignored.
 
 ## Run locally
 
@@ -96,6 +109,7 @@ talk. Watch the transcript arrive:
 curl -N -u USER:PASS http://localhost:3000/events            # live SSE stream, all calls
 curl -s -u USER:PASS http://localhost:3000/calls             # call ids with a transcript
 curl -s -u USER:PASS http://localhost:3000/calls/<call_id>   # merged transcript
+curl -N -u VUSER:VPASS 'http://localhost:3000/events?call_id=<call_id>'   # viewer: one call only
 ```
 
 Without a phone, replay the fixture call into the running app:
