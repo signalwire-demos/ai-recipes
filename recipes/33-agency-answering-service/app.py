@@ -82,17 +82,31 @@ def check_hours(cfg, args):
     return FunctionResult(f"On {day} {cfg['name']} is " + (f"open {span[0]} to {span[1]}." if span else "closed."))
 
 
+def ask_for(args, *keys):
+    """`required` is enforced here, not trusted: the first blank field becomes a question for the model."""
+    for k in keys:
+        if not str(args.get(k) or "").strip():
+            return FunctionResult(f"Ask the caller for their {k.replace('_', ' ')} before saving.")
+    return None
+
+
 def take_message(cfg, args):
+    if problem := ask_for(args, "caller_name", "callback_number", "message"):
+        return problem
     ref = record(cfg, "message", {k: args.get(k, "") for k in ("caller_name", "callback_number", "message")})
     return FunctionResult(f"Message saved for {cfg['name']}, reference {ref}. Tell the caller someone will call back.")
 
 
 def book_appointment(cfg, args):
+    if problem := ask_for(args, "patient_name", "reason"):
+        return problem
     ref = record(cfg, "appointment_request", {k: args.get(k, "") for k in ("patient_name", "reason", "preferred_day")})
     return FunctionResult(f"Appointment request {ref} saved. The office will call to confirm a time.")
 
 
 def request_consultation(cfg, args):
+    if problem := ask_for(args, "name"):
+        return problem
     area = args.get("practice_area")
     if area not in cfg.get("practice_areas", []):
         return FunctionResult(f"The firm handles: {', '.join(cfg.get('practice_areas', []))}. Offer to take a message.")
@@ -114,33 +128,61 @@ def transfer_call(cfg, args):
 
 
 def dispatch_technician(cfg, args):
-    if args.get("emergency") is True:  # emergencies bypass hours and go to the on-call line
+    if not isinstance(args.get("emergency"), bool):  # absent or non-boolean must never become a routine ticket
+        return FunctionResult("Ask whether this is an emergency: no heat below freezing, a gas smell, "
+                              "or water leaking from equipment.")
+    if args["emergency"]:  # emergencies bypass hours and go to the on-call line
         return transfer_to(cfg, "on_call_tech", "emergency")
+    if problem := ask_for(args, "address", "issue"):
+        return problem
     ref = record(cfg, "service_request", {k: args.get(k, "") for k in ("address", "issue")})
     return FunctionResult(f"Service request {ref} saved. Dispatch will call to schedule a visit.")
 
 
-S = {"type": "string"}
+def s(description, **extra):
+    return {"type": "string", "description": description, **extra}
+
+
+PHONE = s("Phone number to call back, digits only with area code. Ask if not provided and read it back to "
+          "confirm; never assume it is the number they are calling from.", pattern="^\\+?[0-9]{10,15}$")
 TOOLS = {
     "check_hours": ("Look up office hours for one day of the week.",
-                    lambda cfg: {"day": {**S, "description": "Day of the week, e.g. monday"}}, ["day"], check_hours),
+                    lambda cfg: {"day": s("Day of the week the caller asked about. Ask which day if they did not "
+                                          "say one.", enum=DAYS)},
+                    ["day"], check_hours),
     "take_message": ("Take a message for the business.",
-                     lambda cfg: {"caller_name": S, "callback_number": S, "message": S},
+                     lambda cfg: {"caller_name": s("Caller's name as they gave it. Ask if not provided."),
+                                  "callback_number": PHONE,
+                                  "message": s("What the caller wants the business to know, in their words. "
+                                               "Ask if not provided.")},
                      ["caller_name", "callback_number", "message"], take_message),
     "book_appointment": ("Submit an appointment request as soon as you have the name and reason. Don't ask "
                          "for an exact date or time: the office calls back to confirm one.",
-                         lambda cfg: {"patient_name": S, "reason": S,
-                                      "preferred_day": {**S, "description": "As the caller said it, e.g. Tuesday"}},
+                         lambda cfg: {"patient_name": s("Patient's full name. Ask if not provided."),
+                                      "reason": s("Reason for the visit in the caller's words, e.g. cleaning, "
+                                                  "toothache. Ask if not provided."),
+                                      "preferred_day": s("Day the caller asked for, as they said it, e.g. Tuesday. "
+                                                         "Omit if they did not say one; do not ask.")},
                          ["patient_name", "reason"], book_appointment),
     "request_consultation": ("Submit a consultation request once you have the name and practice area.",
-                             lambda cfg: {"name": S, "practice_area": {**S, "enum": cfg.get("practice_areas", [])}},
+                             lambda cfg: {"name": s("Caller's full name. Ask if not provided."),
+                                          "practice_area": s("Kind of legal matter, picked from the list from what "
+                                                             "the caller described. Ask if unclear; do not guess.",
+                                                             enum=cfg.get("practice_areas", []))},
                              ["name", "practice_area"], request_consultation),
-    "dispatch_technician": ("Open an HVAC service request once you have the address and issue. "
-                            "emergency=true connects the on-call technician now.",
-                            lambda cfg: {"address": S, "issue": S, "emergency": {"type": "boolean"}},
-                            ["address", "issue", "emergency"], dispatch_technician),
+    "dispatch_technician": ("Open an HVAC service request once you have the address and issue. emergency=true "
+                            "connects the on-call technician now; address and issue may be omitted for an emergency.",
+                            lambda cfg: {"address": s("Service address, street and city. Ask if not provided."),
+                                         "issue": s("What is wrong, in the caller's words. Ask if not provided."),
+                                         "emergency": {"type": "boolean",
+                                                       "description": "true only if the caller confirmed no heat below "
+                                                                      "freezing, a gas smell, or water leaking from "
+                                                                      "equipment; otherwise false. Ask if unsure."}},
+                            ["emergency"], dispatch_technician),
     "transfer_call": ("Transfer the caller to a named line during office hours.",
-                      lambda cfg: {"target": {**S, "enum": sorted(cfg.get("transfer_targets", {}))}},
+                      lambda cfg: {"target": s("Which line to connect, e.g. front_desk. Ask the caller first; only "
+                                               "connect after they agree to be transferred.",
+                                               enum=sorted(cfg.get("transfer_targets", {})))},
                       ["target"], transfer_call),
 }
 
@@ -153,6 +195,8 @@ def configure(query_params, body_params, headers, agent):
     agent.prompt_add_section("Rules", bullets=[
         "Be brief and friendly. You only speak for this one business.",
         "Use only the tools you have. If none fits, offer to take a message.",
+        "When a tool needs the caller's name, callback number, address or reason, ask for each one and read "
+        "numbers back. Never fill in a value the caller did not give.",
     ])
     agent.set_global_data({"tenant": cfg["id"], "business_name": cfg["name"]})
     agent.add_swaig_query_params({"tenant": cfg["id"]})  # SWAIG callbacks resolve the same tenant
