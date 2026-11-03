@@ -167,10 +167,14 @@ def swaig_test_bin() -> str:
 
 
 @pytest.fixture(scope="module")
-def steps():
+def ai():
     out = subprocess.run([swaig_test_bin(), str(RECIPE / "app.py"), "--dump-swml", "--raw"],
                          capture_output=True, text=True, check=True, cwd=RECIPE).stdout
-    ai = next(v["ai"] for v in json.loads(out)["sections"]["main"] if "ai" in v)
+    return next(v["ai"] for v in json.loads(out)["sections"]["main"] if "ai" in v)
+
+
+@pytest.fixture(scope="module")
+def steps(ai):
     return {s["name"]: s for s in ai["prompt"]["contexts"]["default"]["steps"]}
 
 
@@ -185,3 +189,11 @@ def test_governance_each_step_has_exactly_one_door(steps):
 def test_governance_bridge_tool_absent_until_adjuster_accepts(steps):
     for name in ("intake", "submit", "callback"):
         assert "join_adjuster" not in steps[name]["functions"]
+
+
+def test_governance_promise_callback_schema_asks_for_the_callers_words(ai):
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "promise_callback")
+    assert fn["parameters"]["required"] == ["preferred_time"]
+    description = fn["parameters"]["properties"]["preferred_time"]["description"]
+    assert "ask" in description.lower() and "in their words" in description
+    assert "e.g." not in description  # no example value for the model to echo back as the answer

@@ -16,7 +16,7 @@ sys.path.insert(0, str(RECIPE))
 import answers  # noqa: E402
 import claims  # noqa: E402
 import config  # noqa: E402
-from test_tools import FNOL, actions, agent, find, isolated, raw, steps  # noqa: E402,F401
+from test_tools import FNOL, actions, agent, ai, find, isolated, raw, steps  # noqa: E402,F401
 
 TODAY = date(2026, 10, 30)
 
