@@ -12,7 +12,7 @@
         "http-only"
       ],
       "env": {
-        "AUTH_HEADER": "Basic BASE64_OF_USER_COLON_PASSWORD"
+        "AUTH_HEADER": "Bearer YOUR_MCP_TOKEN"
       }
     }
   }

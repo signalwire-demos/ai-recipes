@@ -15,6 +15,7 @@ import pytest
 
 os.environ["SWML_BASIC_AUTH_USER"] = "tester"
 os.environ["SWML_BASIC_AUTH_PASSWORD"] = "test-pass"
+os.environ["MCP_TOKEN"] = "mcp-test-token"
 
 RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
@@ -23,9 +24,11 @@ import config  # noqa: E402
 from app import PhoneAgent, callback_window_text  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
-AUTH = ("tester", "test-pass")
+AUTH = ("tester", "test-pass")                         # SWML basic auth
+MCP = {"Authorization": "Bearer mcp-test-token"}       # /mcp's own credential
 # Values the caller gives on the phone. account_id comes from global_data, never the caller.
-CALLER_SUPPLIED = [("lookup_customer", "phone"), ("book_callback", "when"), ("book_callback", "reason")]
+CALLER_SUPPLIED = [("lookup_customer", "phone"), ("book_callback", "phone"), ("book_callback", "when"),
+                   ("book_callback", "reason")]
 FUTURE_SLOT = "2030-01-07 10:30"   # a Monday, inside callback hours
 
 
@@ -54,11 +57,11 @@ def find(acts, key):
     return [a[key] for a in acts if key in a]
 
 
-def rpc(client, method, params=None, auth=AUTH):
+def rpc(client, method, params=None, headers=MCP, auth=None):
     body = {"jsonrpc": "2.0", "id": 1, "method": method}
     if params is not None:
         body["params"] = params
-    return client.post("/mcp", json=body, auth=auth)
+    return client.post("/mcp", json=body, headers=headers, auth=auth)
 
 
 def mcp_call(client, name, arguments):
@@ -88,23 +91,37 @@ def test_lookup_unknown_number_stays_put(agent):
 
 
 def test_book_callback_writes_booking(agent, callbacks_file):
-    result = agent.book_callback({"account_id": "acme-1003", "when": FUTURE_SLOT, "reason": "IP"}, {})
+    result = agent.book_callback({"account_id": "acme-1003", "phone": "555-555-0103", "when": FUTURE_SLOT,
+                                  "reason": "IP"}, {})
     assert "Booked a callback for Priya Shah" in result.to_dict()["response"]
     rows = [json.loads(line) for line in callbacks_file.read_text().splitlines()]
     assert rows == [{"account_id": "ACME-1003", "when": FUTURE_SLOT, "reason": "IP"}]
     assert find(actions(result), "set_global_data")[0]["callback"]["account_id"] == "ACME-1003"
 
 
+DANA = {"account_id": "ACME-1001", "phone": "+15555550101"}
+
+
 @pytest.mark.parametrize("args, expect", [
-    ({"account_id": "ACME-9999", "when": FUTURE_SLOT}, "no account"),
-    ({"account_id": "ACME-1001", "when": "next tuesday"}, "YYYY-MM-DD HH:MM"),
-    ({"account_id": "ACME-1001", "when": "2030-01-05 10:00"}, "weekdays"),   # Saturday
-    ({"account_id": "ACME-1001", "when": "2030-01-07 18:00"}, "weekdays"),   # after hours
-    ({"account_id": "ACME-1001", "when": "2001-01-08 10:00"}, "future"),     # past
+    ({"account_id": "ACME-9999", "phone": "+15555550101", "when": FUTURE_SLOT}, "no account"),
+    ({"account_id": "ACME-1001", "when": FUTURE_SLOT}, "no account"),                         # no phone
+    ({"account_id": "ACME-1001", "phone": "+15555550102", "when": FUTURE_SLOT}, "no account"),  # Sam's phone
+    ({**DANA, "when": "next tuesday"}, "YYYY-MM-DD HH:MM"),
+    ({**DANA, "when": "2030-01-05 10:00"}, "weekdays"),   # Saturday
+    ({**DANA, "when": "2030-01-07 18:00"}, "weekdays"),   # after hours
+    ({**DANA, "when": "2001-01-08 10:00"}, "future"),     # past
 ])
 def test_book_callback_rejections_write_nothing(agent, callbacks_file, args, expect):
     assert expect in agent.book_callback(args, {}).to_dict()["response"]
     assert not callbacks_file.exists()
+
+
+def test_voice_books_for_the_looked_up_account_not_the_model_arg(agent, callbacks_file):
+    # On a call, lookup_customer put the account in global_data; a different id in args is ignored.
+    raw = {"global_data": {"account_id": "ACME-1002", "name": "Sam Okafor", "plan": "Fiber 1000"}}
+    result = agent.book_callback({"account_id": "ACME-1001", "when": FUTURE_SLOT}, raw)
+    assert "Sam Okafor" in result.to_dict()["response"]
+    assert json.loads(callbacks_file.read_text())["account_id"] == "ACME-1002"
 
 
 def test_transfer_to_human_connects(agent):
@@ -115,9 +132,22 @@ def test_transfer_to_human_connects(agent):
 
 # --- MCP: JSON-RPC against the real /mcp route ------------------------------
 
-def test_mcp_requires_basic_auth(client):
-    assert rpc(client, "tools/list", auth=None).status_code == 401
-    assert rpc(client, "tools/list", auth=("tester", "wrong")).status_code == 401
+def test_mcp_requires_its_own_token(client):
+    assert rpc(client, "tools/list", headers={}).status_code == 401
+    assert rpc(client, "tools/list", headers={"Authorization": "Bearer wrong"}).status_code == 401
+    # The SWML basic-auth credential (the one in the number's webhook URL) doesn't open /mcp.
+    assert rpc(client, "tools/list", headers={}, auth=AUTH).status_code == 401
+
+
+def test_mcp_token_does_not_open_the_swml_route(client):
+    assert client.post("/", json={}, headers=MCP).status_code == 401
+    assert client.post("/", json={}, auth=AUTH).status_code == 200
+
+
+def test_mcp_with_no_token_configured_refuses_everything(client, monkeypatch):
+    monkeypatch.setattr(config, "MCP_TOKEN", "")
+    assert rpc(client, "tools/list", headers={"Authorization": "Bearer "}).status_code == 401
+    assert rpc(client, "tools/list", headers={}).status_code == 401
 
 
 def test_mcp_initialize(client):
@@ -130,13 +160,14 @@ def test_mcp_tools_list_is_the_allowlist(client):
     tools = rpc(client, "tools/list").json()["result"]["tools"]
     assert sorted(t["name"] for t in tools) == sorted(config.MCP_TOOLS)
     book = next(t for t in tools if t["name"] == "book_callback")
-    assert book["inputSchema"]["required"] == ["account_id", "when"]
+    assert book["inputSchema"]["required"] == ["account_id", "phone", "when"]
 
 
 @pytest.mark.parametrize("name, arguments", [
     ("lookup_customer", {"phone": "555 555 0103"}),
     ("lookup_customer", {"phone": "nope"}),
-    ("book_callback", {"account_id": "ACME-1002", "when": "2030-01-05 10:00"}),
+    ("book_callback", {"account_id": "ACME-1002", "phone": "555 555 0102", "when": "2030-01-05 10:00"}),
+    ("book_callback", {"account_id": "ACME-1002", "phone": "555 555 0101", "when": FUTURE_SLOT}),
 ])
 def test_mcp_call_runs_the_same_handler_as_swaig(agent, client, name, arguments):
     direct = getattr(agent, name)(arguments, {}).to_dict()["response"]
@@ -145,8 +176,16 @@ def test_mcp_call_runs_the_same_handler_as_swaig(agent, client, name, arguments)
     assert over_mcp["content"] == [{"type": "text", "text": direct}]
 
 
+def test_mcp_book_callback_needs_the_accounts_phone(client, callbacks_file):
+    # An account id guessed in sequence isn't enough over MCP.
+    for guess in ("ACME-1002", "ACME-1003"):
+        reply = mcp_call(client, "book_callback", {"account_id": guess, "phone": "+15555550101", "when": FUTURE_SLOT})
+        assert "no account" in reply["result"]["content"][0]["text"]
+    assert not callbacks_file.exists()
+
+
 def test_mcp_book_callback_writes_the_same_file(client, callbacks_file):
-    text = mcp_call(client, "book_callback", {"account_id": "ACME-1001", "when": FUTURE_SLOT})
+    text = mcp_call(client, "book_callback", {**DANA, "when": FUTURE_SLOT})
     assert "Booked a callback for Dana Rivera" in text["result"]["content"][0]["text"]
     assert json.loads(callbacks_file.read_text())["account_id"] == "ACME-1001"
 
