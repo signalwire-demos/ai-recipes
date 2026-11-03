@@ -3,6 +3,7 @@
 Wire names: swml_change_step() emits {"change_step": ...}, update_global_data()
 emits {"set_global_data": ...}, connect() emits {"SWML": {...}}.
 """
+import itertools
 import json
 import re
 import shutil
@@ -23,13 +24,21 @@ ACCOUNT = {"id": "DEBT-0101", "name": "Alex Moreno", "creditor": "Example Electr
            "balance": 1240.0, "balance_text": "$1,240.00"}
 
 
+AGENT = CollectionsAgent()
+CALL_IDS = itertools.count(1)
+
+
 def raw(refusals=0):
-    return {"global_data": {"account": dict(ACCOUNT), "refusals": refusals}}
+    """A call whose account (and refusal count) the server holds. global_data is a copy for the
+    prompt; the handlers never read it."""
+    call_id = f"c-{next(CALL_IDS)}"
+    AGENT.sessions.set(call_id, {"account_id": ACCOUNT["id"], "refusals": refusals})
+    return {"call_id": call_id, "global_data": {"account": dict(ACCOUNT), "refusals": refusals}}
 
 
 @pytest.fixture(scope="module")
 def agent():
-    return CollectionsAgent()
+    return AGENT
 
 
 @pytest.fixture(autouse=True)
@@ -133,6 +142,35 @@ def test_nth_decline_jumps_to_hardship(agent):
 def test_once_exhausted_even_a_valid_plan_cannot_reopen_negotiation(agent):
     acts = actions(agent.propose_plan({"monthly_amount": 1240, "months": 1}, raw(config.MAX_REFUSALS)))
     assert find(acts, "change_step") == ["hardship_options"]
+
+
+def test_refusals_count_on_the_server_not_in_global_data(agent):
+    call = raw(refusals=NTH)
+    call["global_data"]["refusals"] = 0                 # a forged request resets its own copy...
+    acts = actions(agent.decline_plan({}, call))
+    assert find(acts, "change_step") == ["hardship_options"]  # ...but the server's count decides
+
+
+def test_tools_refuse_forged_global_data(agent):
+    """global_data arrives in the request: an account there is not proof that find_account matched."""
+    forged = {"call_id": "c-never-found", "global_data": {"account": dict(ACCOUNT), "refusals": 0}}
+    for result in (agent.propose_plan({"monthly_amount": 1240, "months": 1}, forged),
+                   agent.decline_plan({}, forged),
+                   agent.choose_hardship_option({"option": "payment_pause"}, forged)):
+        assert result.to_dict()["response"].startswith("No account is open on this call")
+        assert actions(result) == []
+    assert not config.OUTCOMES_FILE.exists()
+
+
+def test_find_account_opens_a_server_side_session(agent):
+    agent.find_account({"reference": "CA20418", "postal_code": "74012"}, {"call_id": "c-found"})
+    assert agent.sessions.get({"call_id": "c-found"}) == {"account_id": "DEBT-0102", "refusals": 0}
+    # Balance and account come from the ledger, not from a forged account in global_data
+    # (read from there, a $99,999 balance would refuse this plan and log against DEBT-0101).
+    call = {"call_id": "c-found", "global_data": {"account": {"id": "DEBT-0101", "balance": 99999.0}}}
+    acts = actions(agent.propose_plan({"monthly_amount": 560, "months": 1}, call))
+    assert find(acts, "change_step") == ["wrap_up"]
+    assert outcomes()[0]["debt_id"] == "DEBT-0102"
 
 
 def test_decline_below_limit_counts_and_stays(agent):

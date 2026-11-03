@@ -1,9 +1,12 @@
 """Transcript consumer: receives live_transcribe webhooks, stores them, re-broadcasts over SSE.
 
-  POST /transcript              the platform's webhook (basic auth); always answers 200
-  GET  /calls                   call ids with a stored transcript
+  POST /transcript              the platform's webhook (platform auth only); always answers 200
+  GET  /calls                   call ids with a stored transcript (platform auth only)
   GET  /calls/{call_id}         the merged transcript (finals in time order, open partials last)
-  GET  /events[?call_id=...]    Server-Sent Events, one `segment` event per parsed segment
+  GET  /events?call_id=...      Server-Sent Events, one `segment` event per parsed segment
+
+Two credentials. The platform pair (the SWML basic auth) can do everything; the viewer pair
+(VIEWER_USER / VIEWER_PASSWORD) can only read one call it names, and can never write.
 """
 import asyncio
 import base64
@@ -63,18 +66,27 @@ class TranscriptStore:
 
 
 class Broker:
-    """Fan-out to SSE subscribers. Each subscriber gets its own queue."""
+    """Fan-out to SSE subscribers. Each subscriber gets its own bounded queue; one that falls
+    `maxsize` segments behind is disconnected (EventSource reconnects and gets the replay)."""
 
-    def __init__(self):
-        self.queues: set[asyncio.Queue] = set()
+    def __init__(self, maxsize: int = 256):
+        self.maxsize = maxsize
+        self.queues: dict[asyncio.Queue, str | None] = {}  # queue -> call_id filter
 
     def publish(self, seg: Segment) -> None:
-        for q in list(self.queues):
-            q.put_nowait(seg)
+        for q, call_id in list(self.queues.items()):
+            if call_id is not None and seg.call_id != call_id:
+                continue
+            try:
+                q.put_nowait(seg)
+            except asyncio.QueueFull:  # slow consumer: drop it rather than grow without bound
+                self.queues.pop(q, None)
+                q.get_nowait()
+                q.put_nowait(None)
 
     async def stream(self, call_id: str | None, keepalive: float, replay: list[Segment] = ()):
-        q: asyncio.Queue = asyncio.Queue()
-        self.queues.add(q)
+        q: asyncio.Queue = asyncio.Queue(self.maxsize)
+        self.queues[q] = call_id
         try:
             for seg in replay:
                 yield f"event: segment\ndata: {json.dumps(seg.to_dict())}\n\n"
@@ -84,30 +96,48 @@ class Broker:
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
                     continue
-                if call_id is None or seg.call_id == call_id:
-                    yield f"event: segment\ndata: {json.dumps(seg.to_dict())}\n\n"
+                if seg is None:
+                    return
+                yield f"event: segment\ndata: {json.dumps(seg.to_dict())}\n\n"
         finally:
-            self.queues.discard(q)
+            self.queues.pop(q, None)
 
 
 def basic_auth_checker(user: str, password: str):
+    if not (user and password):  # unset credentials match nothing
+        return lambda headers: False
     expected = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
     return lambda headers: hmac.compare_digest(headers.get("authorization", ""), expected)
 
 
-def create_router(store: TranscriptStore, broker: Broker, check_auth, keepalive: float = 15,
-                  path: str = "/transcript") -> APIRouter:
-    def require_auth(request: Request):  # transcripts are private: every route needs auth
-        if not check_auth(dict(request.headers)):
-            raise HTTPException(401, headers={"WWW-Authenticate": "Basic"})
+def create_router(store: TranscriptStore, broker: Broker, check_platform, check_viewer=None,
+                  keepalive: float = 15, path: str = "/transcript", verify_signature=None) -> APIRouter:
+    """check_platform / check_viewer take the request headers; verify_signature (optional)
+    takes (headers, raw_body) and is applied to the webhook POST."""
+    check_viewer = check_viewer or (lambda headers: False)
 
-    router = APIRouter(dependencies=[Depends(require_auth)])
+    def role(request: Request) -> str:  # transcripts are private: every route needs auth
+        headers = dict(request.headers)
+        if check_platform(headers):
+            return "platform"
+        if check_viewer(headers):
+            return "viewer"
+        raise HTTPException(401, headers={"WWW-Authenticate": "Basic"})
 
-    @router.post(path)
+    def platform_only(request: Request):
+        if role(request) != "platform":
+            raise HTTPException(403, "viewer credentials are read-only")
+
+    router = APIRouter(dependencies=[Depends(role)])
+
+    @router.post(path, dependencies=[Depends(platform_only)])
     async def receive(request: Request):
         received_at = time.time()
+        raw = await request.body()
+        if verify_signature and not verify_signature(dict(request.headers), raw.decode(errors="replace")):
+            raise HTTPException(403, "bad signature")
         try:
-            body = json.loads(await request.body() or b"null")
+            body = json.loads(raw or b"null")
         except ValueError:
             body = None
         segments = parse_event(body, received_at)
@@ -117,7 +147,7 @@ def create_router(store: TranscriptStore, broker: Broker, check_auth, keepalive:
             broker.publish(seg)
         return {"ok": True, "segments": len(segments)}  # 200 even when nothing parsed
 
-    @router.get("/calls")
+    @router.get("/calls", dependencies=[Depends(platform_only)])  # listing every call is admin-only
     async def calls():
         return {"calls": store.calls()}
 
@@ -126,7 +156,9 @@ def create_router(store: TranscriptStore, broker: Broker, check_auth, keepalive:
         return {"call_id": call_id, "segments": [s.to_dict() for s in merge(store.segments(call_id))]}
 
     @router.get("/events")
-    async def events(call_id: str | None = None):
+    async def events(request: Request, call_id: str | None = None):
+        if not call_id and role(request) != "platform":  # no all-calls firehose for viewers
+            raise HTTPException(403, "call_id is required")
         replay = merge(store.segments(call_id)) if call_id else []
         return StreamingResponse(broker.stream(call_id, keepalive, replay),
                                  media_type="text/event-stream",

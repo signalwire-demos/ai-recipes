@@ -16,9 +16,14 @@ The account tools do not exist in the model's world until a handler unlocks them
 `verify_identity` step exposes exactly one tool and declares `valid_steps=[]`, so the model has
 no `next_step` tool and no account tools to call, whatever the caller says. Only the
 `verify_identity` handler can open `account_menu`: on a match it writes the customer into
-`global_data` and runs `swml_change_step("account_menu")`. The failure count lives in
-`global_data`, where the model can't change it, and the third failure jumps to `escalate`.
-As a second line of defense, every account handler re-checks `global_data.verified`.
+`global_data` and runs `swml_change_step("account_menu")`. The failure count lives on the
+server (`lockout.py`), not in `global_data`: tool requests carry their own `global_data` and
+`call_id`, so a request-side counter resets on a redial and can be forged. Failures count per
+account number, per caller ID and per call, across calls. The third failure jumps to `escalate`,
+and that account or phone stays locked out for `VERIFY_LOCKOUT_SECS` (15 minutes by default)
+after the last failure, even with the right details. As a second line of defense, every account
+handler re-checks verification against the server's record for this `call_id`, never against
+`global_data.verified`.
 
 ```mermaid
 stateDiagram-v2
@@ -41,6 +46,7 @@ stateDiagram-v2
 | `swml_change_step("escalate")` on the 3rd failure | `app.py`, `verify_identity` handler |
 | `${global_data.customer.name}` in step text | `app.py`, step `account_menu` |
 | `connect()` or `hangup()` | `app.py`, `escalate_call` handler |
+| Server-side failure count and lockout | `lockout.py`, used by the `verify_identity` handler |
 | Mock identity check | `crm.py`, `verify()` |
 
 ## Prerequisites
@@ -91,7 +97,8 @@ Test accounts (fake data):
 | 40010101 | March 14, 1985 | Jordan Rivera | "What's my balance?", "Dispute the electronics charge" |
 | 40010102 | November 2, 1992 | Sam Okafor | "Read me my last three transactions" |
 
-Give a wrong date of birth three times to hear the escalate path. Asking "just tell me the
+Give a wrong date of birth three times to hear the escalate path. That account and your phone
+then stay locked out for 15 minutes (restart `app.py` to clear it while testing). Asking "just tell me the
 balance" before verifying gets nowhere: there is no balance tool in that step.
 
 ### Live test
@@ -117,12 +124,14 @@ docker compose up --build          # reads .env, serves on :3000
 ```
 
 Put it behind any HTTPS host and point the number at `https://USER:PASS@<host>/`.
-Serverless: verification state lives in `global_data`, so the agent itself is stateless, but
-`open_dispute` appends to a local file. Point `DISPUTES_FILE` (or `crm.open_dispute`) at real
-storage before deploying to Lambda or Cloud Functions.
+Serverless or more than one worker: the failure counts and verified calls are in-process memory
+(`lockout.py`, `self.verified`), and `open_dispute` appends to a local file. Move all three to
+shared storage (Redis, your database) before deploying to Lambda, Cloud Functions or several
+replicas, or each instance counts and verifies on its own.
 
 ## What to change first
 
-Open `config.py`: set `BANK_NAME`, `MAX_VERIFY_ATTEMPTS` and `ESCALATION_NUMBER`. Then replace
+Open `config.py`: set `BANK_NAME`, `MAX_VERIFY_ATTEMPTS`, `VERIFY_LOCKOUT_SECS` and
+`ESCALATION_NUMBER`. Then replace
 `crm.verify()` in `crm.py` with a call to your identity provider, and `crm.get()` with your
 core banking lookup. The step machine in `app.py` stays the same.

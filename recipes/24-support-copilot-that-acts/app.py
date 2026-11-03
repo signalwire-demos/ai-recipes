@@ -8,7 +8,7 @@ full results on a web page; the model gets only what it needs to keep advising.
 import asyncio
 import base64
 import json
-import re
+import math
 import secrets
 import threading
 import time
@@ -22,32 +22,9 @@ from signalwire import FunctionResult
 from signalwire.core.swml_service import SWMLService
 
 import config
+from orders import credited_orders, load_orders, phone_digits, record_credit, resolve_order_id
 
 REFUSED = "Credit not issued. The reason is on the rep's screen. Call sidecar_skip."
-
-
-def load_orders() -> dict:
-    """The order backend. Replace with a call to your order API."""
-    return json.loads(config.ORDERS_FILE.read_text())["orders"]
-
-
-def resolve_order_id(raw) -> str:
-    """The order ID as heard. Speech-to-text writes "A 1002" as "eight one zero zero two" or
-    "81002" (live call 7639199e), so when there's no exact match, a unique order whose number
-    ends the digits that were heard is used. Anything else is returned as given and not found."""
-    order_id = str(raw or "").strip().upper()
-    orders = load_orders()
-    if order_id in orders:
-        return order_id
-    digits = re.sub(r"\D", "", order_id)
-    hits = [k for k in orders if digits and len(re.sub(r"\D", "", k)) >= 4 and digits.endswith(re.sub(r"\D", "", k))]
-    return hits[0] if len(hits) == 1 else order_id
-
-
-def credited_orders() -> set:
-    if not config.CREDIT_LEDGER.is_file():
-        return set()
-    return {json.loads(line)["order_id"] for line in config.CREDIT_LEDGER.read_text().splitlines() if line}
 
 
 class Feed:
@@ -75,6 +52,7 @@ class SupportCopilot(SWMLService):
         super().__init__(name="support-copilot", route="/", port=config.PORT, **kwargs)
         self.feed = Feed(config.FEED_SIZE)
         self.ledger_lock = threading.Lock()
+        self.callers: dict = {}   # call_id -> the caller's number, from the platform's SWML request
         order_id = {"order_id": {"type": "string", "description": (
             "Order number as heard, e.g. A-1001. Pass the digits as spoken (A 1002, 81002 and a1002 all resolve); "
             "never write digits as words and never guess an order number that was not said on the call.")}}
@@ -84,7 +62,9 @@ class SupportCopilot(SWMLService):
         self.define_tool(
             name="issue_credit",
             description="Issue a credit on an order after the rep has offered it to the customer.",
-            parameters={**order_id,
+            parameters={"order_id": {"type": "string", "description": (
+                            "The order number exactly as lookup_order returned it, e.g. A-1001. Look the "
+                            "order up first; a credit never resolves a number as heard, and never guess an order number.")},
                         "amount": {"type": "number", "description": (
                             f"Credit amount in {config.CURRENCY}, the exact dollar figure the rep said aloud. "
                             "Never compute, convert or choose an amount yourself.")},
@@ -121,6 +101,18 @@ class SupportCopilot(SWMLService):
             cfg["model"] = config.SIDECAR_MODEL
         return cfg
 
+    def on_request(self, request_data=None, callback_path=None):
+        """The platform's SWML request names the caller. Keep it: credits bind to it, not to the talk."""
+        call = (request_data or {}).get("call")
+        if isinstance(call, dict) and call.get("call_id") and call.get("from"):
+            self.callers[call["call_id"]] = call["from"]
+            while len(self.callers) > config.FEED_SIZE:
+                self.callers.pop(next(iter(self.callers)))
+        return None
+
+    def caller_of(self, raw_data: dict) -> str:
+        return self.callers.get(raw_data.get("call_id")) or raw_data.get("caller_id_num") or ""
+
     def lookup_order(self, args, raw_data):
         order_id = resolve_order_id(args.get("order_id"))
         call_id = (raw_data or {}).get("call_id", "unknown")
@@ -128,19 +120,27 @@ class SupportCopilot(SWMLService):
         if not order:
             self.feed.push({"kind": "order", "order_id": order_id, "found": False, "call_id": call_id})
             return FunctionResult(f"No order {order_id}. The rep's screen shows this. Call sidecar_skip.")
-        self.feed.push({"kind": "order", "order_id": order_id, "found": True, "call_id": call_id, **order})
+        on_caller = phone_digits(order["phone"]) == phone_digits(self.caller_of(raw_data or {}))
+        self.feed.push({"kind": "order", "order_id": order_id, "found": True, "call_id": call_id,
+                        "on_caller": on_caller, **order})   # a credit needs on_caller
         # The model gets status, items and total; the customer's phone and the notes stay on the rep's screen.
         eta = f", expected {order['eta']}" if order.get("eta") else ""
         return FunctionResult(f"Order {order_id}: {order['status']}{eta}. Items: {', '.join(order['items'])}. "
                               f"Total {order['total']:.2f} {config.CURRENCY}. The rep's screen has the order. "
                               "Call sidecar_skip.")
 
-    def credit_refusal(self, order_id: str, amount: float) -> str | None:
+    def credit_refusal(self, order_id: str, amount: float, caller: str) -> str | None:
         """Return why a credit must be refused, or None. The rules the model never sees."""
         order = load_orders().get(order_id)
         if not order:
             return f"No order {order_id}."
-        if amount <= 0:
+        # Both legs are heard, so "the agent said they'd credit order 1002" is just more audio.
+        # The order must belong to the number that placed this call.
+        if not caller:
+            return "The caller's number isn't known for this call, so no order can be matched to them."
+        if phone_digits(order["phone"]) != phone_digits(caller):
+            return f"Order {order_id} is not on the calling number {caller}. Credit it from your billing tool."
+        if not math.isfinite(amount) or amount <= 0:
             return "The amount must be more than zero."
         if amount > config.CREDIT_CAP_USD:
             return f"{amount:.2f} is over the copilot cap of {config.CREDIT_CAP_USD:.2f}. Escalate to a supervisor."
@@ -151,11 +151,13 @@ class SupportCopilot(SWMLService):
         return None
 
     def issue_credit(self, args, raw_data):
-        order_id = resolve_order_id(args.get("order_id"))
+        order_id = str(args.get("order_id") or "").strip().upper()   # exact: no fuzzy match on a write
         call_id = (raw_data or {}).get("call_id", "unknown")
         reason = str(args.get("reason", "")).strip()[:200]
         try:
             amount = round(float(args.get("amount")), 2)
+            if not math.isfinite(amount):   # "nan" passes every comparison and isn't valid JSON
+                raise ValueError(amount)
         except (TypeError, ValueError):
             amount = 0.0
         card = {"kind": "credit", "order_id": order_id, "amount": amount, "currency": config.CURRENCY,
@@ -164,13 +166,11 @@ class SupportCopilot(SWMLService):
             self.feed.push({**card, "status": "refused", "detail": "No reason given."})
             return FunctionResult(REFUSED)
         with self.ledger_lock:   # check and write under one lock: no double credit from parallel calls
-            refusal = self.credit_refusal(order_id, amount)
+            refusal = self.credit_refusal(order_id, amount, self.caller_of(raw_data or {}))
             if refusal:
                 self.feed.push({**card, "status": "refused", "detail": refusal})
                 return FunctionResult(REFUSED)   # same answer for every refusal: nothing to probe
-            with config.CREDIT_LEDGER.open("a") as f:
-                f.write(json.dumps({"order_id": order_id, "amount": amount, "reason": reason,
-                                    "call_id": call_id, "ts": time.time()}) + "\n")
+            record_credit(order_id, amount, reason, call_id)
         self.feed.push({**card, "status": "issued", "detail": f"Credited {amount:.2f} {config.CURRENCY}."})
         return FunctionResult(f"Credit of {amount:.2f} {config.CURRENCY} issued on {order_id}. Call sidecar_skip.")
 
@@ -187,16 +187,27 @@ class SupportCopilot(SWMLService):
         return []
 
 
+def basic(user: str, password: str) -> bytes:
+    return b"Basic " + base64.b64encode(f"{user}:{password}".encode())
+
+
 def build_app(svc: SupportCopilot) -> FastAPI:
     app = FastAPI(redirect_slashes=False)
-    user, password = svc.get_basic_auth_credentials()
-    expected = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+    platform = basic(*svc.get_basic_auth_credentials())
+    # Reps get their own login. The platform credential also opens /swaig, where the sidecar's
+    # tools run unauthenticated by token, so it never goes to a rep. No REP_PASSWORD = page locked.
+    rep = basic(config.REP_USER, config.REP_PASSWORD) if config.REP_PASSWORD else None
 
     @app.middleware("http")
-    async def rep_auth(request: Request, call_next):
-        # /swaig and / check basic auth inside the SDK; guard our own routes the same way.
-        if request.url.path.startswith(("/rep", "/events")) and not secrets.compare_digest(
-                request.headers.get("authorization", ""), expected):
+    async def route_auth(request: Request, call_next):
+        # / and /swaig check the platform credential inside the SDK. /events is the sidecar's
+        # callback, so it takes the platform credential too; /rep takes only the rep's.
+        given, path = request.headers.get("authorization", "").encode(), request.url.path
+        if path.startswith("/rep"):
+            ok = rep is not None and rep != platform and secrets.compare_digest(given, rep)
+        else:
+            ok = not path.startswith("/events") or secrets.compare_digest(given, platform)
+        if not ok:
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="rep"'})
         return await call_next(request)
 
@@ -231,5 +242,6 @@ sidecar = SupportCopilot()
 if __name__ == "__main__":
     import uvicorn
 
-    print(f"Rep page: {config.PUBLIC_URL}/rep/  (basic auth)")
+    print(f"Rep page: {config.PUBLIC_URL}/rep/  (log in with REP_USER / REP_PASSWORD)"
+          if config.REP_PASSWORD else "REP_PASSWORD is not set: the rep page is locked.")
     uvicorn.run(build_app(sidecar), host="0.0.0.0", port=config.PORT)

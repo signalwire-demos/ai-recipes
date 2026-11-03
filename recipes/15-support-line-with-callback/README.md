@@ -23,6 +23,13 @@ config callback looks the record up and sets `global_data` before the model says
 The return call has exactly one tool, `connect_human`, and the phone number never enters its
 context.
 
+Because the caller ID can be spoofed, the store only queues numbers it is willing to dial
+(`store.dialable`): E.164 under `CALLBACK_ALLOWED_PREFIXES` (default `+1`), with NANP premium
+(900, 976) and Caribbean area codes refused, and anonymous or SIP callers turned down. Each
+number gets one pending callback, the queue is capped at `MAX_PENDING_CALLBACKS`, and the
+worker checks the number again before it dials. Writes take a file lock, so the app and the
+worker never hand out the same id or lose each other's updates.
+
 ```mermaid
 stateDiagram-v2
     [*] --> triage
@@ -43,6 +50,7 @@ stateDiagram-v2
 | `update_global_data` + `swml_change_step` / `connect` | `app.py`, `request_human` handler |
 | `set_dynamic_config_callback` | `app.py`, `CallbackAgent.load_context` |
 | REST `client.calling.dial` | `callback_worker.py`, `sweep()` |
+| Toll-fraud guard (allowed prefixes, dedupe, queue cap) | `store.py`, `dialable()` / `create()`; rechecked in `sweep()` |
 | `AgentServer` (two agents, one port) | `app.py`, `/` and `/callback` |
 
 ## Prerequisites
@@ -70,6 +78,8 @@ cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL and basic au
 In `.env`, set `HUMAN_NUMBER` and `FROM_NUMBER`. Availability comes from the mock rota in
 `data/rota.json` (US Central weekdays 9 to 5). To force a path while testing, set
 `AVAILABILITY=busy` (always offer a callback) or `AVAILABILITY=free` (always transfer).
+Callbacks only go to numbers under `CALLBACK_ALLOWED_PREFIXES` (default `+1`), so test from a
+North American phone or add your country code. `MAX_PENDING_CALLBACKS` caps the queue.
 Callback records go to `data/runtime/callbacks.json`, which is created on first use and is
 git-ignored.
 

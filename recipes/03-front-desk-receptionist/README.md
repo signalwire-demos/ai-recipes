@@ -6,7 +6,8 @@ A caller reaches one front desk and is routed to sales, support or billing, each
 
 Riley at the front desk asks what the caller needs and hands them to the right department.
 Franklin in sales quotes plan prices. Rachael in support checks outages and opens tickets.
-Dwight in billing looks up invoices and refunds them (up to a limit). Callers can move between
+Dwight in billing looks up an invoice once the caller gives its number and billing ZIP code,
+and refunds it (up to a limit). Callers can move between
 departments, but only along the routes the code allows, and each handoff wipes the previous
 department's conversation.
 
@@ -19,7 +20,11 @@ any sales, support or front-desk step, so no prompt can talk Franklin into a ref
 declares `set_functions` explicitly, because a step without it inherits the previous context's
 tools. `valid_contexts` is the routing graph: the model's built-in `change_context` tool only
 offers the routes listed for the current department. The refund amount comes from the invoice
-record, never from the model's arguments. The tests read the SWML dump and assert all of this.
+record, never from the model's arguments. Invoice numbers are sequential, so a number alone opens
+nothing: `get_invoice` also needs the billing ZIP on the record, gives one answer for a wrong
+number or a wrong ZIP, and stops after `config.MAX_LOOKUP_FAILURES` misses on a call. A match is
+stored in `global_data.billing_verified`, and `issue_refund` takes no arguments: it refunds only
+that invoice. The tests read the SWML dump and assert all of this.
 
 ```mermaid
 stateDiagram-v2
@@ -48,6 +53,7 @@ stateDiagram-v2
 | `set_valid_contexts(dept["routes"])`, `set_valid_steps([])` | `app.py`, every context and step |
 | `add_enter_filler`, `add_internal_filler("change_context", ...)` | `app.py`, covers each handoff |
 | Amount from the record | `app.py`, `issue_refund` reads `data/invoices.json` and `config.REFUND_LIMIT` |
+| Invoice + ZIP check, refund target in `global_data` | `app.py`, `get_invoice` sets `billing_verified`; `issue_refund` reads it |
 
 ## Prerequisites
 
@@ -78,9 +84,9 @@ ngrok http 3000                    # in another terminal; put the URL in PUBLIC_
 
 In the SignalWire Dashboard, set the phone number's call handler to
 `https://USER:PASS@<your-tunnel>/` (USER/PASS = SWML_BASIC_AUTH_USER/PASSWORD), then call it.
-Try: "How much is the gigabit plan?", then "Can I get a refund on invoice INV-1001?" (sales has
+Try: "How much is the gigabit plan?", then "Can I get a refund on invoice INV-1001?", ZIP 15213 (sales has
 no route to billing, so Franklin sends you back to the front desk or to support first).
-`INV-1002` is over the refund limit and `INV-1003` is already refunded.
+`INV-1002` (ZIP 15217) is over the refund limit and `INV-1003` (ZIP 15222) is already refunded.
 
 Live-tested 2026-10-30, inbound call `b9b47966-4813-4c3a-811b-543fe055920b` (146 s, scripted
 caller, stereo recording on the caller leg). The platform's debug log shows `context_change`
@@ -93,7 +99,7 @@ handoff: median pitch about 230 Hz for Riley (`inworld.Sarah`), 130 to 160 Hz fo
 speaks), and about 85 Hz for Dwight (`inworld.Blake`). No calling errors were logged. The call
 also found a bug, now fixed: speech recognition handed over "Inv1001", which the old exact
 `.upper()` lookup couldn't find. `invoice_key()` now normalizes it to `INV-1001`. The refund
-after that fix has not been tested live.
+after that fix, and the billing ZIP check added since, have not been tested live.
 
 Without a phone:
 
@@ -101,8 +107,8 @@ Without a phone:
 pytest -q
 swaig-test app.py --list-tools
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts | map_values(.steps[0].functions)'
-swaig-test app.py --exec get_invoice --invoice_id INV-1001
-swaig-test app.py --exec issue_refund --invoice_id INV-1001
+swaig-test app.py --exec get_invoice --invoice_id INV-1001 --zip_code 15213
+swaig-test app.py --custom-data '{"global_data": {"billing_verified": "INV-1001"}}' --exec issue_refund
 ```
 
 ## Deploy
@@ -120,4 +126,5 @@ Lambda or Cloud Functions.
 
 Open `config.py`: edit `DEPARTMENTS`. Each entry sets a department's context name, persona,
 voice, role text, the tools it owns and the departments it may route to. Then set
-`BUSINESS_NAME` and `REFUND_LIMIT`, and swap the files in `data/` for your own systems.
+`BUSINESS_NAME`, `REFUND_LIMIT` and `MAX_LOOKUP_FAILURES`, and swap the files in `data/` for your
+own systems (keep a second factor like the billing ZIP on each invoice record).

@@ -12,6 +12,7 @@ import json
 from signalwire import AgentBase, FunctionResult
 
 import config
+from lockout import Lockout, Sessions, keys_for
 
 PUBLIC_FIELDS = ("first_name", "plan")  # the model never sees risk flags or billing notes
 
@@ -29,6 +30,8 @@ class BilingualSupportAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="bilingual-support", route=config.ROUTE, port=config.PORT, **kwargs)
         self.db = load_db()
+        self.lockout = Lockout(config.MAX_LOOKUP_FAILURES, config.LOOKUP_LOCKOUT_SECS)  # server-side, across calls
+        self.sessions = Sessions(config.VERIFIED_SESSION_SECS)  # call_id -> verified account, never global_data
 
         for lang in config.LANGUAGES:
             self.add_language(lang["name"], lang["code"], lang["voice"],
@@ -55,7 +58,8 @@ class BilingualSupportAgent(AgentBase):
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("identify") \
             .set_text("Ask for the six-digit account number and the service ZIP code, "
-                      "then call lookup_account.") \
+                      "then call lookup_account. If it answers locked_try_later, ask the caller "
+                      "to call back later.") \
             .set_functions(["lookup_account"]) \
             .set_valid_steps([])  # only the lookup_account handler can leave this step
         ctx.add_step("help") \
@@ -94,19 +98,26 @@ class BilingualSupportAgent(AgentBase):
     def lookup_account(self, args, raw_data):
         number = "".join(c for c in str(args.get("account_number", "")) if c.isdigit())
         zip_code = "".join(c for c in str(args.get("zip", "")) if c.isdigit())
+        keys = keys_for(number, raw_data)  # per account, caller ID and call: a redial doesn't reset it
+        if self.lockout.locked(*keys):     # before the lookup, so a lucky guess while locked fails too
+            return data({"found": False, "reason": "locked_try_later"})
         acct = self.db["accounts"].get(number)
         if not acct or acct["zip"] != zip_code:
-            return data({"found": False, "reason": "no_match"})
+            locked = self.lockout.fail(*keys) >= config.MAX_LOOKUP_FAILURES
+            return data({"found": False, "reason": "locked_try_later" if locked else "no_match"})
+        self.lockout.clear(keys[0], keys[2])  # the caller ID count stays: it guards other accounts
+        self.sessions.set(str((raw_data or {}).get("call_id") or ""), {"account_id": number})
         public = {k: acct[k] for k in PUBLIC_FIELDS}
         return (
             data({"found": True, **public})
-            .update_global_data({"account_id": number, "account": public})
+            .update_global_data({"account": public})  # prompt text only: tools read self.sessions
             .swml_change_step("help")
         )
 
     def _account(self, raw_data):
-        account_id = (raw_data or {}).get("global_data", {}).get("account_id")
-        return self.db["accounts"].get(account_id or "")
+        """The server's record of who this call verified as. Request global_data is not proof."""
+        session = self.sessions.get(raw_data) or {}
+        return self.db["accounts"].get(session.get("account_id", ""))
 
     @AgentBase.tool(
         name="check_outage",

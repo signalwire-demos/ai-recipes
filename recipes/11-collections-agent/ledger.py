@@ -11,6 +11,11 @@ def find(reference: str, postal_code: str) -> dict | None:
     return next((d for d in debts if d["reference"] == ref and d["postal_code"] == postal_code), None)
 
 
+def get(debt_id: str) -> dict | None:
+    debts = json.loads(config.DEBTS_FILE.read_text())["debts"]
+    return next((d for d in debts if d["id"] == debt_id), None)
+
+
 def record(debt_id: str, outcome: str, **details) -> None:
     config.OUTCOMES_FILE.parent.mkdir(parents=True, exist_ok=True)
     row = {"debt_id": debt_id, "outcome": outcome, "at": datetime.now(timezone.utc).isoformat(), **details}

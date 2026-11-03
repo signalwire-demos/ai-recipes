@@ -4,7 +4,8 @@ Governance point: sales, support and billing are isolated contexts. Each step
 whitelists only its own department's tools with set_functions, so issue_refund
 does not exist anywhere outside billing. valid_contexts is the routing graph:
 the model's change_context tool only offers the routes config.DEPARTMENTS allows.
-The refund amount comes from the invoice record, never from the model.
+The refund amount comes from the invoice record, never from the model, and only an
+invoice the caller unlocked with its billing ZIP can be refunded.
 """
 import json
 import re
@@ -135,39 +136,50 @@ class FrontDeskAgent(AgentBase):
         return FunctionResult(f"Ticket {ticket_id} is open. Read the number back to the caller.")
 
     # --- billing -------------------------------------------------------------
+    # An invoice number is sequential and guessable, so it is never enough on its own: the
+    # billing ZIP on the record is the second factor. The match is remembered in global_data,
+    # which the model can't write, and issue_refund refunds only that invoice.
     @AgentBase.tool(
         name="get_invoice",
-        description="Look up an invoice by its number, for example INV-1001.",
+        description="Look up an invoice by its number (for example INV-1001) and the billing ZIP code.",
         parameters={"type": "object",
                     "properties": {"invoice_id": {
                         "type": "string", "pattern": INVOICE_PATTERN,
                         "description": "The caller's invoice number, normalized to INV-#### (for example "
-                                       "INV-1001). Ask for it if not provided."}},
-                    "required": ["invoice_id"]},
+                                       "INV-1001). Ask for it if not provided."},
+                                   "zip_code": {
+                        "type": "string", "pattern": "^[0-9]{5}$",
+                        "description": "The 5-digit billing ZIP code on the account. Ask for it if not "
+                                       "provided; never guess it."}},
+                    "required": ["invoice_id", "zip_code"]},
     )
     def get_invoice(self, args, raw_data):
+        failures = int((raw_data.get("global_data") or {}).get("billing_failures", 0))
+        if failures >= config.MAX_LOOKUP_FAILURES:
+            return FunctionResult("Too many failed lookups on this call. Don't look up invoices again; "
+                                  "offer to take the caller back to the front desk.")
         invoice_id = invoice_key(args.get("invoice_id"))
+        zip_code = re.sub(r"\D", "", str(args.get("zip_code") or ""))
+        if not str(args.get("invoice_id") or "").strip() or not zip_code:   # nothing to check yet: not a miss
+            return FunctionResult("Ask the caller for the invoice number and the billing ZIP code.")
         inv = load(config.INVOICES_FILE).get(invoice_id)
-        if not inv:
-            return FunctionResult("I can't find that invoice. Ask the caller to read the number again.")
+        if not inv or not zip_code or zip_code != inv["zip"]:   # one answer for both: nothing to probe
+            return FunctionResult("That invoice number and ZIP code don't match. Ask the caller to "
+                                  "check both.").update_global_data({"billing_failures": failures + 1})
         status = "refunded" if invoice_id in refunded_ids() else inv["status"]
-        return FunctionResult(f"Invoice {invoice_id} is ${inv['amount']:.2f}, status {status}.")
+        return FunctionResult(f"Invoice {invoice_id} is ${inv['amount']:.2f}, status {status}.") \
+            .update_global_data({"billing_verified": invoice_id})
 
     @AgentBase.tool(
         name="issue_refund",
-        description="Refund an invoice in full. Only call after the caller confirms.",
-        parameters={"type": "object",
-                    "properties": {"invoice_id": {
-                        "type": "string", "pattern": INVOICE_PATTERN,
-                        "description": "Invoice number already looked up with get_invoice, as INV-#### "
-                                       "(for example INV-1001). Ask if not provided."}},
-                    "required": ["invoice_id"]},
+        description="Refund the invoice found with get_invoice, in full. Only call after the caller confirms.",
+        parameters={"type": "object", "properties": {}, "required": []},
     )
     def issue_refund(self, args, raw_data):
-        invoice_id = invoice_key(args.get("invoice_id"))
-        inv = load(config.INVOICES_FILE).get(invoice_id)
+        invoice_id = (raw_data.get("global_data") or {}).get("billing_verified")  # never from the model
+        inv = load(config.INVOICES_FILE).get(invoice_id) if invoice_id else None
         if not inv:
-            return FunctionResult("I can't find that invoice, so no refund was made.")
+            return FunctionResult("Look the invoice up with get_invoice first, so no refund was made.")
         if inv["status"] == "refunded" or invoice_id in refunded_ids():
             return FunctionResult(f"Invoice {invoice_id} has already been refunded.")
         amount = inv["amount"]  # from the record, never from the model

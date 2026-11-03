@@ -5,9 +5,11 @@ code decides which ones. config.MCP_TOOLS is an allowlist: lookup_customer and
 book_callback are shared, transfer_to_human (it moves a live call) stays
 voice-only and can't be listed or called over MCP. The handlers enforce their
 own rules (known account, business hours) because an MCP client has no steps,
-and they never return the CRM's internal fields on either channel.
+and they never return the CRM's internal fields on either channel. /mcp has its
+own credential (MCP_TOKEN, a bearer token); the SWML basic auth doesn't open it.
 """
 import calendar
+import hmac
 import json
 import re
 from datetime import datetime
@@ -42,7 +44,9 @@ class PhoneAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="acme-support", route=config.ROUTE, port=config.PORT, **kwargs)
         self.customers = load_customers()
-        self.enable_mcp_server()  # POST /mcp, behind the same basic auth as the SWML
+        self.enable_mcp_server()  # POST /mcp, behind its own bearer token (see _check_basic_auth)
+        if not config.MCP_TOKEN:
+            self.log.warning("mcp_disabled", reason="MCP_TOKEN unset: /mcp answers 401")
 
         self.add_language("English", config.LANGUAGE_CODE, config.VOICE)
         self.prompt_add_section(
@@ -68,6 +72,14 @@ class PhoneAgent(AgentBase):
     # The one seam: the SDK's MCP endpoint lists and calls whatever this returns.
     def _mcp_tools(self):
         return {n: f for n, f in super()._mcp_tools().items() if n in config.MCP_TOOLS}
+
+    # The SDK's /mcp route checks auth with this method. There, only MCP_TOKEN counts, so the
+    # credential the platform uses for SWML can't drive the CRM tools, and vice versa.
+    def _check_basic_auth(self, request):
+        if request.url.path.rstrip("/") != config.ROUTE.rstrip("/") + "/mcp":
+            return super()._check_basic_auth(request)
+        token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        return bool(config.MCP_TOKEN) and hmac.compare_digest(token.encode(), config.MCP_TOKEN.encode())
 
     @AgentBase.tool(
         name="lookup_customer",
@@ -104,6 +116,9 @@ class PhoneAgent(AgentBase):
                                "description": "The account_id returned by lookup_customer "
                                               "(global_data.account_id), e.g. ACME-1001. Never ask the "
                                               "caller for it or invent one."},
+                "phone": {"type": "string",
+                          "description": "The phone number on that account, as the caller says it, any "
+                                         "format. Ask the caller for it; never use the caller ID."},
                 "when": {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$",
                          "description": "Callback date and time, local, 24-hour clock, exactly "
                                         "YYYY-MM-DD HH:MM (e.g. 2026-11-10 14:30). Ask the caller for "
@@ -112,14 +127,17 @@ class PhoneAgent(AgentBase):
                            "description": "Short reason for the callback, in the caller's own words. "
                                           "Ask if not provided."},
             },
-            "required": ["account_id", "when"],
+            "required": ["account_id", "phone", "when"],
         },
     )
     def book_callback(self, args, raw_data):
-        account_id = str(args.get("account_id", "")).strip().upper()
+        verified = (raw_data.get("global_data") or {}).get("account_id")  # voice: set by lookup_customer
+        account_id = verified or str(args.get("account_id", "")).strip().upper()
         record = next((c for c in self.customers.values() if c["account_id"] == account_id), None)
-        if not record:
-            return FunctionResult(f"There is no account {account_id or '(blank)'}. Look the customer up first.")
+        # MCP has no call state, so an account id alone isn't enough: its phone number must match.
+        if not record or (not verified and self.customers.get(normalize_phone(args.get("phone"))) is not record):
+            return FunctionResult(f"There is no account {account_id or '(blank)'} with that phone number. "
+                                  "Look the customer up first.")
         try:
             when = datetime.strptime(str(args.get("when", "")).strip(), "%Y-%m-%d %H:%M")
         except ValueError:

@@ -40,7 +40,7 @@ jobs:
           if grep -qE '^(scripts/|recipe\.schema\.yaml|\.github/workflows/)' <<<"$changed"; then
             changed="$changed"$'\n'"$(git ls-files recipes)"
           fi
-          recipes="$({ grep -oE '^recipes/[^/]+/' <<<"$changed" || true; } | sort -u \
+          recipes="$({ grep -oE '^recipes/[A-Za-z0-9_-]+/' <<<"$changed" || true; } | sort -u \
             | while read -r d; do [[ -d "$d" ]] && echo "${d%/}"; done \
             | jq -R . | jq -sc .)"
           swml="$(git ls-files '*.swml.yaml' '*.swml.json' | jq -R . | jq -sc .)"
@@ -60,6 +60,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      RECIPE: ${{ matrix.recipe }}   # PR-controlled folder name: use "$RECIPE" in run steps, never ${{ }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -72,14 +74,14 @@ jobs:
           .venv/bin/pip install -q -r scripts/requirements.txt
 
       - name: Validate recipe.yaml
-        run: .venv/bin/python scripts/validate_manifests.py "${{ matrix.recipe }}"
+        run: .venv/bin/python scripts/validate_manifests.py "$RECIPE"
 
       - name: Check README sections
-        run: .venv/bin/python scripts/check_readme.py "${{ matrix.recipe }}"
+        run: .venv/bin/python scripts/check_readme.py "$RECIPE"
 
       - name: App line count
         run: |
-          app="${{ matrix.recipe }}/app.py"
+          app="$RECIPE/app.py"
           [[ -f "$app" ]] || { echo "no app.py (SWML-only recipe)"; exit 0; }
           n=$(wc -l < "$app")
           echo "app.py: $n lines"
@@ -95,7 +97,7 @@ jobs:
           .venv/bin/pip install -q -r requirements.txt
           # Extras are fine: signalwire-sdk[search]==3.7.5 counts as the pin.
           grep -qE '^signalwire-sdk(\[[a-z0-9,-]+\])?==3\.7\.5[[:space:]]*(#.*)?$' requirements.txt \
-            || { echo "::error file=${{ matrix.recipe }}/requirements.txt::must pin signalwire-sdk==3.7.5"; exit 1; }
+            || { echo "::error file=$RECIPE/requirements.txt::must pin signalwire-sdk==3.7.5"; exit 1; }
 
       - name: pytest
         if: hashFiles(format('{0}/tests/*.py', matrix.recipe)) != ''

@@ -180,3 +180,22 @@ def test_readme_raw_swml_is_the_shipped_datamap():
     yaml = pytest.importorskip("yaml")
     block = re.search(r"```yaml\n(.*?)```", (RECIPE / "README.md").read_text(), re.S)[1]
     assert yaml.safe_load(block)["SWAIG"]["functions"] == [json.loads(GOLDEN.read_text())]
+
+
+def test_api_key_is_never_logged(monkeypatch, caplog, capsys):
+    """The key is in the served SWML (DataMap runs on SignalWire, see the README security note),
+    but this app never writes it to its own logs, even at DEBUG."""
+    import logging
+
+    import signalwire
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(config, "TRACKING_API_KEY", "test-key-0000")
+    signalwire.configure_logging()
+    caplog.set_level(logging.DEBUG)
+    logging.getLogger().setLevel(logging.DEBUG)
+    agent = TrackingAgent()
+    user, password = agent.get_basic_auth_credentials()
+    swml = TestClient(agent.get_app()).post("/", json={}, auth=(user, password)).text
+    assert "Bearer test-key-0000" in swml          # the documented exposure: anyone who can fetch SWML
+    out = capsys.readouterr()
+    assert "test-key-0000" not in caplog.text + out.out + out.err

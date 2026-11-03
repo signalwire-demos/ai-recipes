@@ -7,7 +7,9 @@ to the SWML pay verb, which collects the card by DTMF and posts it straight to t
 payment connector. pay can't run inside a live AI session, so the call leaves the agent
 for pay and transfers back to it at after_payment. The model never hears the pay verb's
 result: resume_recording, the only tool there, turns the recording back on and says
-"went through" only if the connector approved this call's charge.
+"went through" only if the connector approved this call's charge. The verified account and
+the pay_ref live on the server keyed by call_id (self.sessions); global_data is prompt text
+only, because tool requests carry their own global_data and a forged one could set the amount.
 """
 import json
 import secrets
@@ -17,6 +19,9 @@ from signalwire import AgentBase, FunctionResult
 
 import config
 from connector import make_router
+from lockout import Lockout, Sessions, keys_for
+
+LOCKED = "Too many failed attempts. Tell the caller you can't verify the account right now and to call back later."
 
 
 def load_accounts() -> dict:
@@ -27,6 +32,8 @@ class BillPaymentAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="bill-payment", route=config.ROUTE, port=config.PORT, **kwargs)
         self.accounts = load_accounts()
+        self.lockout = Lockout(config.MAX_VERIFY_FAILURES, config.VERIFY_LOCKOUT_SECS)  # server-side, across calls
+        self.sessions = Sessions(config.VERIFIED_SESSION_SECS)  # call_id -> {account_id, pay_ref}
         self.pay_status: dict[str, dict] = {}  # call_id -> last pay status event (no card fields)
         self.pay_approvals: dict[str, str] = {}  # pay_ref -> charge_id, written only by the connector
         self.pending_pay: dict[str, dict] = {}   # pay_ref -> {"account": ...} while the caller is in pay
@@ -86,9 +93,16 @@ class BillPaymentAgent(AgentBase):
         Unknown or reused refs start a normal call at verify."""
         pending = self.pending_pay.pop(str(query_params.get("pay_ref", "")), None)
         if pending:
+            body = body_params or {}  # the call_id the SDK reads too: top level, or under "call"
+            call_id = str(body.get("call_id") or (body.get("call") or {}).get("call_id") or "")
+            self.sessions.set(call_id, {"account_id": pending["account"]["id"], "pay_ref": query_params["pay_ref"]})
             agent.set_global_data({"account": pending["account"],
                                    "payment": {"ref": query_params["pay_ref"]}})
             agent.define_contexts().get_context("default").set_initial_step("after_payment")
+
+    def account_view(self, number: str) -> dict:
+        acct = self.accounts[number]
+        return {"id": number, "name": acct["name"], "balance_due": f"{acct['balance_due']:.2f}"}
 
     @AgentBase.tool(
         name="verify_account",
@@ -108,14 +122,20 @@ class BillPaymentAgent(AgentBase):
     def verify_account(self, args, raw_data):
         number = "".join(ch for ch in str(args.get("account_number", "")) if ch.isdigit())
         zip_code = "".join(ch for ch in str(args.get("service_zip", "")) if ch.isdigit())[:5]
+        keys = keys_for(number, raw_data)  # per account, caller ID and call: a redial doesn't reset it
+        if self.lockout.locked(*keys):     # before the lookup, so a lucky guess while locked fails too
+            return FunctionResult(LOCKED)
         acct = self.accounts.get(number)
         if not acct or acct["service_zip"] != zip_code:
+            if self.lockout.fail(*keys) >= config.MAX_VERIFY_FAILURES:
+                return FunctionResult(LOCKED)
             return FunctionResult("That didn't match our records. Ask the caller to check both and try again.")
+        self.lockout.clear(keys[0], keys[2])  # the caller ID count stays: it guards other accounts
+        self.sessions.set(str((raw_data or {}).get("call_id") or ""), {"account_id": number})
         return (
             FunctionResult("Verified. This call is recorded from here on.")
             .record_call(control_id=config.RECORDING_CONTROL_ID, stereo=True, format="mp3")
-            .update_global_data({"account": {"id": number, "name": acct["name"],
-                                             "balance_due": f"{acct['balance_due']:.2f}"}})
+            .update_global_data({"account": self.account_view(number)})  # prompt text only
             .swml_change_step("bill")
         )
 
@@ -125,8 +145,11 @@ class BillPaymentAgent(AgentBase):
         parameters={"type": "object", "properties": {}},  # no amount: the model can't set it
     )
     def take_payment(self, args, raw_data):
-        account = ((raw_data or {}).get("global_data") or {}).get("account") or {}
-        amount = float(account.get("balance_due") or 0)
+        session = self.sessions.get(raw_data)
+        if not session:
+            return FunctionResult("The caller is not verified on this call.")
+        account = self.account_view(session["account_id"])  # from the billing record, never global_data
+        amount = float(account["balance_due"])
         if amount <= 0:
             return FunctionResult("There is nothing to pay on this account.").swml_change_step("wrap_up")
         connector_url, status_url = self.connector_urls()
@@ -135,7 +158,7 @@ class BillPaymentAgent(AgentBase):
         pay_verb = next(v for v in FunctionResult().pay(
             payment_connector_url=connector_url,
             status_url=status_url,
-            charge_amount=f"{amount:.2f}",  # from global_data, never from model arguments
+            charge_amount=f"{amount:.2f}",  # from the billing record, never model args or global_data
             description=f"{config.UTILITY_NAME} bill",
             security_code=config.PAY_SECURITY_CODE,
             postal_code=config.PAY_POSTAL_CODE,
@@ -167,7 +190,7 @@ class BillPaymentAgent(AgentBase):
         call (the signal that also works with a real processor's connector)."""
         raw_data = raw_data or {}
         event = self.pay_status.get(str(raw_data.get("call_id", "")), {})
-        ref = str(((raw_data.get("global_data") or {}).get("payment") or {}).get("ref", ""))
+        ref = str((self.sessions.get(raw_data) or {}).get("pay_ref", ""))  # set by configure(), not the request
         charge_id = self.pay_approvals.get(ref) if ref else None
         paid = bool(charge_id) or event.get("for") == "payment-completed"
         if paid:

@@ -6,10 +6,14 @@ Governance points:
 - reschedule_appointment changes the booking named in global_data, which dynamic config
   preloaded from the store. The model can't pick a different booking.
 - book and reschedule have valid_steps=[]: only handlers move the call, and confirmed has no tools.
+- /sms answers only requests signed with SIGNALWIRE_SIGNING_KEY (no key: 403), and a booking
+  gets at most one call back per DIAL_BACK_COOLDOWN_MINUTES, however many texts arrive.
 """
 import asyncio
 import json
 import re
+import threading
+from time import monotonic
 from urllib.parse import parse_qsl
 from xml.sax.saxutils import escape
 
@@ -68,6 +72,9 @@ class ConfirmationAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="appointment-confirmation", route=config.ROUTE, port=config.PORT, **kwargs)
         self.slots = json.loads(config.SLOTS_FILE.read_text())
+        self._last_dial, self._dial_lock = {}, threading.Lock()   # confirmation -> time of the last call back
+        if not config.SIGNING_KEY:
+            self.log.warning("sms_disabled", reason="SIGNALWIRE_SIGNING_KEY unset: /sms answers 403")
 
         self.add_language("English", config.LANGUAGE_CODE, config.VOICE)
         self.prompt_add_section("Role", f"You book appointments for {config.BUSINESS_NAME}. Be brief.")
@@ -187,6 +194,11 @@ class ConfirmationAgent(AgentBase):
         if booking is None:
             return f"{config.BUSINESS_NAME}: we couldn't find a booking for this number. Call us to book."
         if set(re.findall(r"[a-z]+", body.lower())) & set(config.ESCALATE_WORDS):
+            with self._dial_lock:  # one call back per booking per cooldown, however many texts arrive
+                now, last = monotonic(), self._last_dial.get(booking["confirmation"], float("-inf"))
+                if now - last < config.DIAL_BACK_COOLDOWN_MINUTES * 60:
+                    return f"{config.BUSINESS_NAME}: we just called about {booking['confirmation']}. Try later."
+                self._last_dial[booking["confirmation"]] = now
             self.dial_back(booking)
             return f"{config.BUSINESS_NAME}: we're calling you now to change {booking['confirmation']}."
         return sms_body(booking)
@@ -198,7 +210,7 @@ class ConfirmationAgent(AgentBase):
         async def inbound_sms(request: Request) -> Response:
             raw = (await request.body()).decode()
             signature = request.headers.get("X-SignalWire-Signature", "")
-            if config.SIGNING_KEY and not validate_webhook_signature(
+            if not config.SIGNING_KEY or not validate_webhook_signature(  # no key: refuse, never trust
                 config.SIGNING_KEY, signature, config.PUBLIC_URL.rstrip("/") + config.SMS_ROUTE, raw
             ):
                 return Response(status_code=403)

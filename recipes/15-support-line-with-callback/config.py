@@ -24,6 +24,12 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+# .env.example ships SWML_BASIC_AUTH_PASSWORD=change-me. Anyone who has read this repo knows it,
+# and it guards the SWML, every tool and every route here, so never serve with it.
+if os.environ.get("SWML_BASIC_AUTH_PASSWORD", "").strip() == "change-me":
+    raise SystemExit("SWML_BASIC_AUTH_PASSWORD is still the .env.example placeholder: "
+                     "set a long random value (python -c 'import secrets; print(secrets.token_urlsafe(24))').")
+
 # The SDK builds its webhook URLs from SWML_PROXY_URL_BASE. Recipes use PUBLIC_URL.
 if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
     os.environ["SWML_PROXY_URL_BASE"] = os.environ["PUBLIC_URL"].rstrip("/")
@@ -48,6 +54,12 @@ AVAILABILITY = os.environ.get("AVAILABILITY", "rota")
 CALLBACKS_FILE = Path(os.environ.get("CALLBACKS_FILE") or HERE / "data" / "runtime" / "callbacks.json")
 WORKER_INTERVAL = int(os.environ.get("WORKER_INTERVAL", "30"))  # seconds between sweeps
 CALLBACK_ROUTE = "/callback"             # the return call's agent; the worker dials into it
+# Toll-fraud guard: the caller ID can be spoofed, so only these numbers are ever called back.
+# E.164 prefixes, comma-separated (default: NANP). Inside +1, the premium 900 area code, the 976
+# exchange and the Caribbean area codes that bill as international are always refused.
+CALLBACK_ALLOWED_PREFIXES = [p.strip() for p in os.environ.get("CALLBACK_ALLOWED_PREFIXES", "+1").split(",") if p.strip()]
+BLOCKED_NPAS = set("900 242 246 264 268 284 345 441 473 649 658 664 721 758 767 784 809 829 849 868 869 876".split())
+MAX_PENDING_CALLBACKS = int(os.environ.get("MAX_PENDING_CALLBACKS", "50"))   # queue cap; one per number
 
 # --- Server ---------------------------------------------------------------
 PORT = int(os.environ.get("PORT", "3000"))

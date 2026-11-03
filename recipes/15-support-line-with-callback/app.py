@@ -14,6 +14,13 @@ import rota
 import store
 
 NO_ARGS = {"type": "object", "properties": {}}
+REFUSED = {
+    "not_dialable": "I can't book a callback to the number on this call. Apologize, suggest they call "
+                    "back from their own phone, and say goodbye.",
+    "duplicate": "A callback is already booked for this number. Tell them a specialist will call, "
+                 "and say goodbye.",
+    "full": "The callback list is full right now. Apologize, ask them to call back later, and say goodbye.",
+}
 
 
 class SupportAgent(AgentBase):
@@ -82,7 +89,10 @@ class SupportAgent(AgentBase):
             return FunctionResult("Ask the caller when a callback would suit them.")
         if not number or not ticket.get("issue"):
             return FunctionResult("I can't book a callback on this call. Apologize and say goodbye.")
-        rec = store.create(number, ticket["issue"], ticket.get("summary", ""), preferred)
+        try:  # the store refuses numbers it won't dial, a second pending callback, or a full queue
+            rec = store.create(number, ticket["issue"], ticket.get("summary", ""), preferred)
+        except store.Refused as why:
+            return FunctionResult(REFUSED[str(why)])
         return FunctionResult(
             f"Callback {rec['id']} booked for {preferred}. Confirm the time, tell them a specialist "
             "will call this number back, and say goodbye.", post_process=True,

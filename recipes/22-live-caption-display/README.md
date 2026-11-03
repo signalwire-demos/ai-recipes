@@ -6,8 +6,8 @@ Open a web page while a call is running and watch live captions appear, each wit
 
 A caller dials the number and hears one sentence saying the call is captioned. SignalWire
 transcribes both legs and POSTs each partial and final result to this app, which stores it and
-pushes it over Server-Sent Events. Open `http://localhost:3000/captions` in a browser, using the
-same username and password as the SWML route. The page draws partial text in grey italics, swaps
+pushes it over Server-Sent Events. Open `http://localhost:3000/captions?call_id=<id>` in a browser
+and log in with the read-only viewer login (`VIEWER_USER` / `VIEWER_PASSWORD`). The page draws partial text in grey italics, swaps
 it for solid text when the final result arrives, and shows the measured delay next to every line.
 On today's platform only final utterances have been seen, so expect solid lines (see the TODO
 below).
@@ -18,8 +18,13 @@ The transcript pipeline is recipe #21, copied in so this folder stands alone.
 The display is honest about latency, and it can't change what was said. Each segment's
 `delay_ms` is computed on the server: the platform's event time (`ts`) against the moment the
 consumer received the webhook (`received_at`). The browser's clock is never used, so a slow
-laptop can't hide a slow pipeline. The page is read-only. It subscribes to `/events` and has no
-write path, and it sits behind the same basic auth as the transcript. The call flow underneath is
+laptop can't hide a slow pipeline. The page is read-only, and so is its login. The SWML basic auth
+is the platform's: it alone can POST `/transcript`, list every call at `/calls`, and stream all
+calls. The viewer login opens `/captions` and reads one call it names (`/calls/<id>`,
+`/events?call_id=<id>`); anything else gets a 403, so a captions screen can't forge segments or
+watch other calls. With `SIGNALWIRE_SIGNING_KEY` set, `POST /transcript` also needs a valid
+`X-SignalWire-Signature`. A subscriber that falls `SSE_QUEUE_MAX` segments behind is disconnected
+(the page reconnects and gets the replay). The call flow underneath is
 code: `live_transcribe` starts right after `answer`, the webhook is your own endpoint, and the SWML
 has no `ai` verb, so no model is in the call path.
 
@@ -43,6 +48,7 @@ stateDiagram-v2
 | Server-side delay (`ts` vs `received_at`) | `adapter.py`, `Segment.delay_ms` |
 | SSE fan-out, replay on connect | `consumer.py`, `Broker`, `GET /events` |
 | Captions page (partial grey, final solid, delay badge) | `static/captions.html`, served at `GET /captions` in `app.py` |
+| Platform vs viewer login, webhook signature | `consumer.py`, `create_router()`; `app.py`, `auth_checkers()`, `signature_verifier()` |
 
 ### The event payload and what is not confirmed yet
 
@@ -57,6 +63,9 @@ leg.
   sharing the final's `utterance_id`), until the platform is seen sending partials.
 - `TODO(blocked: conference behavior undocumented)`. This is a single-call dial-in, like #21.
 - The delay is only as good as the clock sync between SignalWire and your server. Run NTP.
+- Not confirmed live: whether `live_transcribe` webhooks carry `X-SignalWire-Signature`, and
+  whether the signed URL includes the `user:pass@` part (both forms are accepted). Leave
+  `SIGNALWIRE_SIGNING_KEY` blank until a live call shows signed events, or every event gets a 403.
 
 ## Prerequisites
 
@@ -72,8 +81,12 @@ git clone https://github.com/signalwire-demos/ai-recipes
 cd ai-recipes/recipes/22-live-caption-display
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL and basic auth
+cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL, basic auth and VIEWER_*
 ```
+
+`VIEWER_USER` / `VIEWER_PASSWORD` is the login you give a captions screen. Left blank, there is no
+viewer login and only the SWML basic auth opens the page. A viewer pair equal to the SWML basic
+auth is ignored.
 
 ## Run locally
 
@@ -83,9 +96,10 @@ ngrok http 3000                    # in another terminal; put the URL in PUBLIC_
 ```
 
 In the SignalWire Dashboard, set the phone number's call handler to
-`https://USER:PASS@<your-tunnel>/` (USER/PASS = SWML_BASIC_AUTH_USER/PASSWORD). Open
-`http://localhost:3000/captions` (log in with USER/PASS), call the number, and talk. Add
-`?call_id=<id>` to follow one call. The page then also replays what was already said.
+`https://USER:PASS@<your-tunnel>/` (USER/PASS = SWML_BASIC_AUTH_USER/PASSWORD). Call the number,
+find the call id (`curl -u USER:PASS localhost:3000/calls`, admin only), and open
+`http://localhost:3000/captions?call_id=<id>` with the viewer login. The page follows that one
+call and replays what was already said. Without `?call_id=` it asks for one.
 
 Without a phone, replay the fixture call into the running app while the page is open:
 
@@ -94,8 +108,8 @@ python replay.py                   # the meeting call (final utterances), paced 
 python replay.py --file data/fixtures/partials-synthetic.jsonl   # grey partials, then a final
 ```
 
-Open `http://localhost:3000/captions` first (it follows all calls), or the `?call_id=` URL that
-`replay.py` prints. `replay.py` moves each event's timestamp to "now minus 0.08 to 0.6 s", so
+Open the `?call_id=` URL that `replay.py` prints (the fixture call id is fixed, so the page can
+be opened before the replay starts). `replay.py` moves each event's timestamp to "now minus 0.08 to 0.6 s", so
 the delay badges show believable numbers.
 
 ```bash

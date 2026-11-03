@@ -49,6 +49,13 @@ stateDiagram-v2
 | Deterministic objection classifier | `app.py`, `classify()`; rules in `config.PLAYBOOK` |
 | Sidecar callback consumer (`sidecar_event.type`, `turn.customer_text`) | `app.py`, `on_event()` and `POST /events` |
 | Rep page over SSE | `app.py`, `GET /rep/stream`; UI in `web/` |
+| Rep login separate from the platform credential | `app.py`, `build_app()`; `REP_USER` / `REP_PASSWORD` in `config.py` |
+
+The tool is `secure=False` because the sidecar's tool calls carry no per-call SWAIG token, so
+`/swaig` is guarded only by the platform's basic auth (`SWML_BASIC_AUTH_*`, embedded in the
+sidecar's URLs). That credential stays on the server: reps log in to `/rep/` with their own
+`REP_USER` / `REP_PASSWORD`, which `/swaig`, `/events` and `/` refuse. The rep page stays locked
+while `REP_PASSWORD` is blank or equal to the platform password.
 
 ### Live-tested
 
@@ -95,7 +102,7 @@ git clone https://github.com/signalwire-demos/ai-recipes
 cd ai-recipes/recipes/23-sales-call-copilot
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL, basic auth and REP_NUMBER
+cp .env.example .env    # fill in the SIGNALWIRE_* keys, PUBLIC_URL, basic auth, REP_NUMBER and REP_PASSWORD
 ```
 
 ## Run locally
@@ -106,8 +113,8 @@ ngrok http 3000                    # in another terminal; put the URL in PUBLIC_
 ```
 
 `PUBLIC_URL` goes into the SWML (the sidecar's event and tool URLs), so restart `app.py` after you
-set it. Open `https://<your-tunnel>/rep/` in a browser and log in with the basic auth user and
-password. In the SignalWire Dashboard, set the phone number's call handler to
+set it. Open `https://<your-tunnel>/rep/` in a browser and log in with `REP_USER` / `REP_PASSWORD`
+(not the SWML basic auth). In the SignalWire Dashboard, set the phone number's call handler to
 `https://USER:PASS@<your-tunnel>/` (USER/PASS = SWML_BASIC_AUTH_USER/PASSWORD). Then call it,
 answer on the rep phone, and as the customer say "Honestly it's too expensive" or "We already use Globex".
 
@@ -134,7 +141,9 @@ docker compose up --build          # reads .env, serves on :3000
 Put it behind any HTTPS host, set `PUBLIC_URL` to that host, and point the number at
 `https://USER:PASS@<host>/`. The rep page is at `https://<host>/rep/`.
 Serverless: not a good fit. The rep page holds a long-lived SSE connection, and the cards live
-in process memory (`config.FEED_SIZE`), so run a single long-lived container.
+in process memory (`config.FEED_SIZE`), so run a single long-lived container. There is one rep
+line and one rep login, so everyone with it sees every call's cards. For several reps, give each
+a login and filter the stream by the calls bridged to them.
 
 ## What to change first
 

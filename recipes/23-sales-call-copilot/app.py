@@ -138,16 +138,27 @@ class SalesCopilot(SWMLService):
         return []
 
 
+def basic(user: str, password: str) -> bytes:
+    return b"Basic " + base64.b64encode(f"{user}:{password}".encode())
+
+
 def build_app(svc: SalesCopilot) -> FastAPI:
     app = FastAPI(redirect_slashes=False)
-    user, password = svc.get_basic_auth_credentials()
-    expected = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode()
+    platform = basic(*svc.get_basic_auth_credentials())
+    # Reps get their own login. The platform credential also opens /swaig, where the sidecar's
+    # tools run unauthenticated by token, so it never goes to a rep. No REP_PASSWORD = page locked.
+    rep = basic(config.REP_USER, config.REP_PASSWORD) if config.REP_PASSWORD else None
 
     @app.middleware("http")
-    async def rep_auth(request: Request, call_next):
-        # /swaig and / check basic auth inside the SDK; guard our own routes the same way.
-        if request.url.path.startswith(("/rep", "/events")) and not secrets.compare_digest(
-                request.headers.get("authorization", ""), expected):
+    async def route_auth(request: Request, call_next):
+        # / and /swaig check the platform credential inside the SDK. /events is the sidecar's
+        # callback, so it takes the platform credential too; /rep takes only the rep's.
+        given, path = request.headers.get("authorization", "").encode(), request.url.path
+        if path.startswith("/rep"):
+            ok = rep is not None and rep != platform and secrets.compare_digest(given, rep)
+        else:
+            ok = not path.startswith("/events") or secrets.compare_digest(given, platform)
+        if not ok:
             return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="rep"'})
         return await call_next(request)
 
@@ -183,5 +194,6 @@ sidecar = SalesCopilot()
 if __name__ == "__main__":
     import uvicorn
 
-    print(f"Rep page: {config.PUBLIC_URL}/rep/  (basic auth)")
+    print(f"Rep page: {config.PUBLIC_URL}/rep/  (log in with REP_USER / REP_PASSWORD)"
+          if config.REP_PASSWORD else "REP_PASSWORD is not set: the rep page is locked.")
     uvicorn.run(build_app(sidecar), host="0.0.0.0", port=config.PORT)
