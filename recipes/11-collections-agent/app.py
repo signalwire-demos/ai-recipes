@@ -4,13 +4,19 @@ Governance point: a business outcome overrides whatever the model or the caller
 wants next. propose_plan is judged by policy.py, whose thresholds never reach the
 model. On the Nth refusal the handler jumps the call to `hardship_options` with
 swml_change_step, whatever arguments the model sent. Abuse or a request for a
-person jumps to `escalate`.
+person jumps to `escalate`. The account and the refusal count live on the server, keyed by
+call_id (self.sessions), so a forged tool request can't pick the account or reset the count.
 """
 from signalwire import AgentBase, FunctionResult
 
 import config
 import ledger
 import policy
+from lockout import Lockout, Sessions, keys_for
+
+NO_ACCOUNT = "No account is open on this call. Ask for the reference number and ZIP code again."
+LOCKED = ("Too many failed attempts. Say you can't find the account right now and the caller can "
+          "call back later. Say nothing about any account or debt.")
 
 # What the model hears when a plan is refused: a direction, never the number.
 REFUSAL_HINTS = {
@@ -19,10 +25,6 @@ REFUSAL_HINTS = {
     policy.SHORT: "That plan wouldn't pay off the balance. Ask about a higher amount or more months.",
     policy.INVALID: "That isn't a plan we can set up. Ask for a monthly amount and a number of months.",
 }
-
-
-def gd(raw_data) -> dict:
-    return raw_data.get("global_data") or {}
 
 
 def to_hardship(refusals: int) -> FunctionResult:
@@ -37,6 +39,8 @@ def to_hardship(refusals: int) -> FunctionResult:
 class CollectionsAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="collections-agent", route=config.ROUTE, port=config.PORT, **kwargs)
+        self.lockout = Lockout(config.MAX_LOOKUP_FAILURES, config.LOOKUP_LOCKOUT_SECS)  # server-side, across calls
+        self.sessions = Sessions(config.VERIFIED_SESSION_SECS)  # call_id -> {account_id, refusals}
         self.add_language("English", config.LANGUAGE_CODE, config.VOICE)
         self.prompt_add_section(
             "Role",
@@ -89,14 +93,24 @@ class CollectionsAgent(AgentBase):
         }, "required": ["reference", "postal_code"]},
     )
     def find_account(self, args, raw_data):
+        # A match discloses the debtor's name, creditor and balance (FDCPA third-party disclosure),
+        # so guesses are limited per reference, caller ID and call: a redial doesn't reset them.
+        reference = "".join(c for c in str(args.get("reference", "")).upper() if c.isalnum())
+        keys = keys_for(reference, raw_data)
+        if self.lockout.locked(*keys):  # before the lookup, so a lucky guess while locked fails too
+            return FunctionResult(LOCKED)
         debt = ledger.find(str(args.get("reference", "")), str(args.get("postal_code", "")).strip())
         if not debt:
+            if self.lockout.fail(*keys) >= config.MAX_LOOKUP_FAILURES:
+                return FunctionResult(LOCKED)
             return FunctionResult("No account matches. Ask the caller to read the reference number again.")
+        self.lockout.clear(keys[0], keys[2])  # the caller ID count stays: it guards other accounts
+        self.sessions.set(str((raw_data or {}).get("call_id") or ""), {"account_id": debt["id"], "refusals": 0})
         account = {"id": debt["id"], "name": debt["name"], "creditor": debt["creditor"],
                    "balance": debt["balance"], "balance_text": f"${debt['balance']:,.2f}"}
         return (
             FunctionResult(f"Found the account. Greet {debt['name'].split()[0]} and explain the balance.")
-            .update_global_data({"account": account, "refusals": 0})
+            .update_global_data({"account": account, "refusals": 0})  # prompt text; tools read self.sessions
             .swml_change_step("negotiate")
         )
 
@@ -113,18 +127,21 @@ class CollectionsAgent(AgentBase):
         }, "required": ["monthly_amount", "months"]},
     )
     def propose_plan(self, args, raw_data):
-        refusals = int(gd(raw_data).get("refusals", 0))
-        if policy.refusals_exhausted(refusals):      # already over the line: arguments don't matter
-            return to_hardship(refusals)
-        verdict = policy.evaluate(float(gd(raw_data)["account"]["balance"]), args.get("monthly_amount"), args.get("months"))
+        session = self.sessions.get(raw_data)
+        debt = session and ledger.get(session["account_id"])
+        if not debt:
+            return FunctionResult(NO_ACCOUNT)
+        if policy.refusals_exhausted(session["refusals"]):  # already over the line: arguments don't matter
+            return to_hardship(session["refusals"])
+        verdict = policy.evaluate(float(debt["balance"]), args.get("monthly_amount"), args.get("months"))
         if verdict == policy.ACCEPT:
             monthly, months = float(args["monthly_amount"]), int(args["months"])
             summary = f"{months} monthly payments of ${monthly:,.2f}, the first one due in 30 days"
-            ledger.record(gd(raw_data)["account"]["id"], "plan", monthly_amount=monthly, months=months)
+            ledger.record(debt["id"], "plan", monthly_amount=monthly, months=months)
             return (FunctionResult("The plan is approved.")
                     .update_global_data({"outcome": summary})
                     .swml_change_step("wrap_up"))
-        return self._refuse(refusals, REFUSAL_HINTS[verdict])
+        return self._refuse(session, REFUSAL_HINTS[verdict])
 
     @AgentBase.tool(
         name="decline_plan",
@@ -134,11 +151,14 @@ class CollectionsAgent(AgentBase):
         }},
     )
     def decline_plan(self, args, raw_data):
-        return self._refuse(int(gd(raw_data).get("refusals", 0)),
-                            "Acknowledge that. Ask if a smaller amount over a longer time could work.")
+        session = self.sessions.get(raw_data)
+        if not session:
+            return FunctionResult(NO_ACCOUNT)
+        return self._refuse(session, "Acknowledge that. Ask if a smaller amount over a longer time could work.")
 
-    def _refuse(self, refusals: int, hint: str) -> FunctionResult:
-        refusals += 1
+    def _refuse(self, session: dict, hint: str) -> FunctionResult:
+        """The count is the server's; the global_data copy is only for logs, never read back."""
+        session["refusals"] = refusals = session["refusals"] + 1
         if policy.refusals_exhausted(refusals):
             return to_hardship(refusals)
         return FunctionResult(hint).update_global_data({"refusals": refusals})
@@ -151,10 +171,12 @@ class CollectionsAgent(AgentBase):
         }, "required": ["option"]},
     )
     def choose_hardship_option(self, args, raw_data):
-        option = args.get("option")
+        option, session = args.get("option"), self.sessions.get(raw_data)
+        if not session:
+            return FunctionResult(NO_ACCOUNT)
         if option not in config.HARDSHIP_OFFERS:
             return FunctionResult("That isn't one of the options. Offer them again.")
-        ledger.record(gd(raw_data)["account"]["id"], "hardship", option=option)
+        ledger.record(session["account_id"], "hardship", option=option)
         return (FunctionResult("Recorded.")
                 .update_global_data({"outcome": config.HARDSHIP_OFFERS[option]})
                 .swml_change_step("wrap_up"))
@@ -169,7 +191,7 @@ class CollectionsAgent(AgentBase):
         }, "required": ["reason"]},
     )
     def escalate(self, args, raw_data):
-        account_id = (gd(raw_data).get("account") or {}).get("id", "unknown")
+        account_id = (self.sessions.get(raw_data) or {}).get("account_id", "unknown")
         ledger.record(account_id, "escalated", reason=str(args.get("reason", "requested_person")))
         return FunctionResult("Escalating.").swml_change_step("escalate")
 

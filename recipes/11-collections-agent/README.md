@@ -17,10 +17,18 @@ A business outcome overrides whatever the model or the caller wants next (cookbo
 authority inversion). `propose_plan` sends the caller's offer to `policy.py`, which checks the
 minimum payment, maximum term and refusal count from `config.py`. Those numbers never appear in
 the prompt, the step text, the tool schemas or `global_data`, so the model can't reveal or
-bargain over a floor it has never seen. The refusal count lives in `global_data`, where only
-handlers write it. On the Nth refusal the handler runs `swml_change_step("hardship_options")`,
+bargain over a floor it has never seen. The account and the refusal count live on the server,
+keyed by `call_id` (`lockout.py`, `Sessions`): `find_account` opens that record and every later
+tool reads only it, never request `global_data`, which a forged tool request could fill in.
+`global_data` gets a copy for the prompt text. On the Nth refusal the handler runs `swml_change_step("hardship_options")`,
 whatever arguments the model sent, and every step has `valid_steps=[]`, so the model can't
 navigate back to `negotiate`.
+
+A match on `find_account` discloses who owes what to whom, which the FDCPA forbids telling a
+third party, so nothing about the account is spoken before it and guessing is limited: failed
+lookups count on the server (`lockout.py`) per reference number, caller ID and call, across
+calls. After `MAX_LOOKUP_FAILURES` (3) that reference or phone gets no match for
+`LOOKUP_LOCKOUT_SECS` (15 minutes) after the last failure, even with the right ZIP code.
 
 ```mermaid
 stateDiagram-v2
@@ -45,6 +53,7 @@ stateDiagram-v2
 | Refusal wording that hides the numbers | `app.py`, `REFUSAL_HINTS` |
 | `set_functions` + `set_valid_steps([])` on every step | `app.py`, `CollectionsAgent.__init__` |
 | `swml_change_step("escalate")`, then `connect()` or `hangup()` | `app.py`, `escalate` and `transfer_to_agent` handlers |
+| Server-side lookup failure count and lockout | `lockout.py`, used by `find_account` |
 | Outcome log | `ledger.py`, `record()` |
 
 ## Prerequisites
@@ -86,8 +95,8 @@ Without a phone:
 pytest -q
 swaig-test app.py --list-tools
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
-swaig-test app.py --custom-data '{"global_data": {"account": {"id": "DEBT-0101", "balance": 1240.0}, "refusals": 0}}' \
-    --exec propose_plan --monthly_amount 20 --months 62
+swaig-test app.py --exec find_account --reference CA20417 --postal_code 74101
+# propose_plan needs a call that find_account matched in the same process, so pytest covers it
 ```
 
 Test accounts (fake data):
@@ -129,12 +138,14 @@ docker compose up --build          # reads .env, serves on :3000
 ```
 
 Put it behind any HTTPS host and point the number at `https://USER:PASS@<host>/`.
-Serverless: call state lives in `global_data`, but `ledger.record()` appends to a local file.
-Point `OUTCOMES_FILE` (or `ledger.record`) at real storage before deploying to Lambda or Cloud Functions.
+Serverless: `ledger.record()` appends to a local file, and the open accounts, refusal counts and
+lookup failure counts (`lockout.py`) are in-process memory. Point `OUTCOMES_FILE` (or
+`ledger.record`) and the lockout at shared storage before deploying to Lambda, Cloud Functions
+or more than one replica.
 
 ## What to change first
 
 Open `config.py`: set the policy thresholds (`MIN_MONTHLY_PAYMENT`, `MAX_TERM_MONTHS`,
 `MAX_REFUSALS`) and the `HARDSHIP_OFFERS` your business can make. Keep numbers out of the
 offer text, since that text goes into the prompt. Then replace `ledger.find()` with your
-collections system.
+collections system. `MAX_LOOKUP_FAILURES` and `LOOKUP_LOCKOUT_SECS` set the lookup lockout.
