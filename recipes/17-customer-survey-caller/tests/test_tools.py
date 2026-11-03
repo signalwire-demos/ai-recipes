@@ -73,9 +73,37 @@ def test_optional_open_question_accepts_empty(agent):
     assert rows()[0]["answer"] == "Great hygienist"
 
 
-def test_prefab_validate_response_still_works(agent):
-    out = agent.validate_response({"question_id": "issue_resolved", "response": "maybe"}, {})
-    assert "yes" in out.to_dict()["response"]
+@pytest.mark.parametrize("tool", ["log_response", "validate_response"])
+@pytest.mark.parametrize("args", [{}, {"response": "9"}, {"question_id": "likely_to_recommend"}])
+def test_missing_required_field_is_refused_and_not_written(agent, tool, args):
+    # The schema marks both fields required; the handler enforces it and says what to ask for.
+    result = getattr(agent, tool)(args, {"call_id": "c4"}).to_dict()
+    assert result.get("action", []) == []
+    assert result["response"].startswith(("Unknown question", "No answer was given"))
+    assert rows() == []
+
+
+@pytest.mark.parametrize("spoken,value", [("nine", 9), ("9", 9), ("a seven out of ten", 7)])
+def test_validate_response_agrees_with_log_response_on_spoken_numbers(agent, spoken, value):
+    # Regression: the prefab's validate_response int()-parsed "nine" as invalid while the
+    # recipe's log_response accepted it (live call 46145b42). Both now share normalize().
+    args = {"question_id": "likely_to_recommend", "response": spoken}
+    assert agent.validate_response(args, {}).to_dict()["response"] == \
+        f"Valid: likely_to_recommend = {value}. Call log_response with the answer."
+    agent.log_response(args, {"call_id": "c5"})
+    assert rows()[0]["answer"] == value
+
+
+@pytest.mark.parametrize("qid,response", [
+    ("likely_to_recommend", "eleven"), ("best_part", "parking"), ("issue_resolved", "maybe"),
+])
+def test_validate_response_refuses_what_log_response_refuses(agent, qid, response):
+    args = {"question_id": qid, "response": response}
+    checked = agent.validate_response(args, {}).to_dict()
+    assert checked["response"].startswith("Not valid") and checked.get("action", []) == []
+    logged = agent.log_response(args, {"call_id": "c6"}).to_dict()
+    assert logged["response"] == checked["response"].replace("Not valid", "Not recorded")
+    assert rows() == []
 
 
 def test_per_call_customer_id(agent):
@@ -123,6 +151,15 @@ def test_governance_only_survey_tools_and_customer_from_url(ai):
     log = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "log_response")
     assert "customer_id" not in log["parameters"]["properties"]   # the model can't pick whose row it is
     assert ai["global_data"]["customer_id"] == "P-0101"
+
+
+def test_governance_answer_schema_is_shared_typed_and_asks(ai):
+    params = {f["function"]: f["parameters"] for f in ai["SWAIG"]["functions"]}
+    assert params["validate_response"] == params["log_response"]   # one schema, so the tools agree
+    schema = params["log_response"]
+    assert schema["required"] == ["question_id", "response"]
+    assert schema["properties"]["question_id"]["enum"] == [q["id"] for q in config.QUESTIONS]
+    assert "ask" in schema["properties"]["response"]["description"].lower()
 
 
 # --- score_results.py --------------------------------------------------------
