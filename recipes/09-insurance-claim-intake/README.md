@@ -27,7 +27,9 @@ model passes the caller's next words back as `submit_claim(answer=...)`. Code ap
 correction to the flagged field only, so the gather never restarts. The `submit` step exposes one tool, `submit_claim`. Its handler
 writes the claim record, then returns `hold(step="connected", timeout_step="callback")` and
 `rpc_dial(to_number, from_number, dest_swml)`. The `dest_swml` is this app's `/brief` route,
-which turns the claim record into the SWML the adjuster's leg runs: speak the briefing, wait
+which turns the claim record into the SWML the adjuster's leg runs: speak the briefing (the
+caller's location and description are read as "in the caller's words" and capped at
+`BRIEFING_MAX_CHARS`, so they can't pose as instructions), wait
 for a keypress, and on `1` run `execute_rpc ai_unhold` on the caller and join the claim's
 conference. So the platform, not the model, decides which step the caller lands in. The
 `join_adjuster` tool only exists in `connected`, and `promise_callback` only exists in `callback`.
@@ -132,6 +134,7 @@ database first.
 Open `config.py`: edit `pick_adjuster()` to route by claim type (for example, injuries to a
 bodily-injury desk) instead of one `ADJUSTER_NUMBER`, and tune `HOLD_TIMEOUT`. Set
 `POLICY_PREFIX` and `POLICY_DIGITS` to your policy number format and `MAX_CLAIM_AGE_DAYS` to
-how far back a claim can be filed by phone. `MODEL` picks the LLM. To change the
+how far back a claim can be filed by phone. `MODEL` picks the LLM. `BRIEFING_MAX_CHARS` caps
+how much of the caller's own words the adjuster hears. To change the
 claim fields, edit the gather questions in `app.py`, `CHECKS` in `answers.py`, `FIELDS` and
 `briefing()` in `claims.py`, and `data/claim.schema.json` together.
