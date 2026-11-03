@@ -1,5 +1,6 @@
 """on_summary and analyze.py tests, plus governance assertions on the swaig-test SWML dump."""
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -139,3 +140,17 @@ def test_governance_post_prompt_is_the_schema(ai):
     assert all(f'"{r}"' in text for r in config.REASONS)
     assert ai["post_prompt"]["temperature"] == config.POST_PROMPT_TEMPERATURE
     assert ai["post_prompt_url"].split("?")[0].endswith("/post_prompt/")
+
+
+def test_governance_post_prompt_fallbacks_match_schema(ai):
+    """null/[] are offered only where the schema accepts them: never for outcome or reasons."""
+    text = ai["post_prompt"]["text"]
+    props = extraction.SCHEMA["properties"]
+    assert None not in props["outcome"]["enum"] and props["reasons"]["minItems"] >= 1
+    assert "null" in props["competitor"]["type"] and "minItems" not in props["objections"]
+    assert "use null or []" not in text                      # the old blanket fallback is gone
+    assert '"no_decision"' in text and "no_decision" in config.OUTCOMES
+    assert 'Use null for "competitor" and [] for "objections" only when they did not say' in text
+    for sentence in re.split(r"[.\n]", text):
+        if "null" in sentence or "[]" in sentence:
+            assert '"outcome"' not in sentence and '"reasons"' not in sentence, sentence

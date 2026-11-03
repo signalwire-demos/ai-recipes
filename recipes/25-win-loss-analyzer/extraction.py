@@ -33,7 +33,9 @@ POST_PROMPT = (
     "for the outcome, most important first\n"
     '- "competitor": the other vendor they chose or compared most closely, or null\n'
     '- "objections": short phrases for each concern they raised about us, or []\n'
-    "Use only what the prospect said. If they did not say, use null or []."
+    f'Use only what the prospect said. "outcome" is always one of the {len(config.OUTCOMES)} '
+    'values ("no_decision" if they have not bought or decided). Use null for "competitor" and '
+    '[] for "objections" only when they did not say.'
 )
 
 
