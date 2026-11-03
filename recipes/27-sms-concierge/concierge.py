@@ -23,6 +23,11 @@ def load_json(path):
     return json.loads(path.read_text())
 
 
+# The amenity_hours enum: the keys of data/amenities.json, the same dict the handler looks
+# up. Built here because the @AgentBase.tool decorator reads it when the class is defined.
+AMENITIES = list(load_json(config.AMENITIES_FILE))
+
+
 def channel_of(raw_data: dict) -> str:
     # The AI Chat service marks its requests conversation_type "chat"; calls don't set it.
     return "text" if raw_data.get("conversation_type") == "chat" else "voice"
@@ -52,7 +57,9 @@ class HotelConcierge(AgentBase):
             .set_text(
                 "Help ${global_data.guest.name} in room ${global_data.guest.room}. Answer amenity "
                 "questions with amenity_hours and log requests with request_service. "
-                f"You can only log these requests: {', '.join(config.SERVICES)}."
+                f"You can only log these requests: {', '.join(config.SERVICES)}. "
+                "For a wake-up call or late checkout, ask the guest for the time before "
+                "calling request_service and put it in notes."
             ) \
             .set_functions(["amenity_hours", "request_service"]) \
             .set_valid_steps([])
@@ -63,8 +70,10 @@ class HotelConcierge(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "room": {"type": "string", "description": "Room number, digits only"},
-                "last_name": {"type": "string", "description": "Guest's last name"},
+                "room": {"type": "string", "pattern": "^[0-9]{1,5}$",
+                         "description": "The guest's room number, digits only. Ask if not provided."},
+                "last_name": {"type": "string",
+                              "description": "The guest's last name as they gave it. Ask if not provided."},
             },
             "required": ["room", "last_name"],
         },
@@ -86,7 +95,13 @@ class HotelConcierge(AgentBase):
         description="Look up hours and location for a hotel amenity.",
         parameters={
             "type": "object",
-            "properties": {"amenity": {"type": "string", "description": "e.g. pool, gym, breakfast"}},
+            "properties": {
+                "amenity": {
+                    "type": "string", "enum": AMENITIES,
+                    "description": "The hotel amenity the guest is asking about, lowercase: "
+                                   f"{', '.join(AMENITIES)}. Ask which amenity if the guest did not name one.",
+                },
+            },
             "required": ["amenity"],
         },
     )
@@ -103,8 +118,13 @@ class HotelConcierge(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "service": {"type": "string", "enum": list(config.SERVICES), "description": "Which service"},
-                "notes": {"type": "string", "description": "Optional details, e.g. a time"},
+                "service": {"type": "string", "enum": list(config.SERVICES),
+                            "description": "Which service the guest wants, one of the listed values. "
+                                           "Ask if not provided."},
+                "notes": {"type": "string",
+                          "description": "Details the guest gave, such as the wake-up time or late-checkout "
+                                         "time. For a wake-up call or late checkout, ask the guest for the "
+                                         "time if not provided; never assume one."},
             },
             "required": ["service"],
         },
