@@ -33,11 +33,13 @@ class LeadQualificationAgent(AgentBase):
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("qualify") \
             .set_text(
-                "Learn four things, in any order: budget (record_budget), timeline (record_timeline), "
-                "whether the caller signs off on the purchase (record_authority), and what they need "
-                "(record_need). Nothing is recorded until its tool runs: the moment the caller gives "
-                "one of these, call its tool in that same turn, before you reply. Never say you "
-                "recorded something unless the tool returned Recorded."
+                "Ask the caller for four things, one question at a time and in any order: budget "
+                "(record_budget), timeline (record_timeline), whether they sign off on the purchase "
+                "(record_authority), and what they need (record_need). Call a tool only with a value "
+                "the caller actually stated, never a guess or an inference from how they want to be "
+                "marked. Nothing is recorded until its tool runs: the moment the caller gives one of "
+                "these, call its tool in that same turn, before you reply. Never say you recorded "
+                "something unless the tool returned Recorded."
             ) \
             .set_functions(["record_budget", "record_timeline", "record_authority", "record_need"]) \
             .set_valid_steps([])  # only the last record_* handler moves the call
@@ -53,7 +55,10 @@ class LeadQualificationAgent(AgentBase):
         name="record_budget",
         description="Record the caller's budget for this purchase, in US dollars.",
         parameters={"type": "object", "properties": {
-            "amount_usd": {"type": "integer", "description": "Whole dollars. 0 if no budget yet."},
+            "amount_usd": {"type": "integer",
+                           "description": "Budget in whole US dollars as stated by the caller, e.g. 20000. "
+                                          "Ask if not provided. Send 0 only if the caller says they have "
+                                          "no budget yet."},
         }, "required": ["amount_usd"]},
     )
     def record_budget(self, args, raw_data):
@@ -70,7 +75,10 @@ class LeadQualificationAgent(AgentBase):
         description="Record how many months until the caller wants to buy.",
         parameters={"type": "object", "properties": {
             "months": {"type": "integer",
-                       "description": f"0 = this month. {config.MAX_TIMELINE_MONTHS} if just researching."},
+                       "description": "Whole months from now until the caller wants to buy, as stated by "
+                                      "the caller: this month = 0, next month = 1, next quarter = 3, just "
+                                      f"researching = {config.MAX_TIMELINE_MONTHS}. Ask if not provided; "
+                                      "never infer it."},
         }, "required": ["months"]},
     )
     def record_timeline(self, args, raw_data):
@@ -86,7 +94,8 @@ class LeadQualificationAgent(AgentBase):
         description="Record whether the caller makes or signs off on the buying decision.",
         parameters={"type": "object", "properties": {
             "is_decision_maker": {"type": "boolean",
-                                  "description": "True if the caller makes or signs off on the decision"},
+                                  "description": "true if the caller says they make or sign off on the "
+                                                 "purchase, false if someone else does. Ask if not provided."},
         }, "required": ["is_decision_maker"]},
     )
     def record_authority(self, args, raw_data):
@@ -101,11 +110,14 @@ class LeadQualificationAgent(AgentBase):
         description="Record the main thing the caller needs.",
         parameters={"type": "object", "properties": {
             "need": {"type": "string", "enum": config.NEEDS,
-                     "description": "The closest match to what the caller needs"},
+                     "description": "The category closest to what the caller says they need; use other "
+                                    "if none fits. Ask if not provided."},
         }, "required": ["need"]},
     )
     def record_need(self, args, raw_data):
-        need = str(args.get("need", "")).strip().lower()
+        need = str(args.get("need") or "").strip().lower()
+        if not need:
+            return FunctionResult("I need to know what the caller needs. Ask them.")
         if need not in config.NEEDS:
             return FunctionResult(f"Pick the closest of: {', '.join(config.NEEDS)}.")
         return record(raw_data, "need", need, f"need {need.replace('_', ' ')}")
