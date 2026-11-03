@@ -44,19 +44,27 @@ class CalendarAgent(AgentBase):
                         "Set PUBLIC_URL (or MCP_URL).", config.MCP_URL)
 
         self.add_language("English", config.LANGUAGE_CODE, config.VOICE)
+        # The voice reads "10 AM" as "ten em", so times are said with "in the morning" or "in the
+        # afternoon". These catch an AM or PM the model writes anyway (case-sensitive: "I am" is safe).
+        self.add_pronunciation("AM", "in the morning")
+        self.add_pronunciation("PM", "in the afternoon")
         self.prompt_add_section(
             "Role",
             f"You book and move appointments for {config.BUSINESS_NAME} by phone. Be brief.",
         )
         self.prompt_add_section("Rules", bullets=[
             "Ask for the caller's full name before anything else.",
-            "Ask the caller which day they want. Never assume today. Use get_today only to turn a "
-            "relative day like 'next Tuesday' into YYYY-MM-DD.",
+            "Ask the caller which day they want. Never assume today. When they name a relative day "
+            "like 'next Tuesday', call get_today and work out YYYY-MM-DD yourself; never ask the "
+            "caller for the date.",
             "Ask what the visit is for before booking.",
-            "To book: ask for the day, then find_free_slots for that date, offer at most three times, "
-            "ask which one, then book_meeting.",
+            "To book: ask for the day, then find_free_slots for that date. If the caller already said "
+            "a time, don't ask again: book it if it is free, and offer other times only if it isn't. "
+            "Otherwise offer at most three times, ask which one, then book_meeting.",
             "To move: find_my_meetings (it lists the meetings booked from this caller's phone), confirm which one, ask for the new day, "
             "then find_free_slots for it, offer at most three times, ask which one, then move_meeting.",
+            "Say times on the 12-hour clock with 'in the morning' before noon and 'in the afternoon' "
+            "after, like 'ten thirty in the morning', 'noon' or 'two in the afternoon'. Never say AM or PM.",
             "Read back the result the tool gives you. If a tool says a slot is taken, offer another.",
             "You can't cancel meetings by phone. Offer to move the meeting instead.",
         ])
