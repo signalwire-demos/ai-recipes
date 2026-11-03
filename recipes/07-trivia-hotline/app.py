@@ -103,7 +103,14 @@ class TriviaAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "answer": {"type": "string", "description": "What the caller said, verbatim"},
+                "answer": {
+                    "type": "string",
+                    "description": (
+                        "The caller's spoken answer to the current question, verbatim, or their "
+                        "words if they give up. Only call after the caller has spoken; ask the "
+                        "question and wait if they have not. Never supply an answer yourself."
+                    ),
+                },
             },
             "required": ["answer"],
         },
