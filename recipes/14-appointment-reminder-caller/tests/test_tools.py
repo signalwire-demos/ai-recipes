@@ -198,6 +198,23 @@ def test_governance_no_appointment_details_before_identity(ai):
         assert detail not in swml_text
 
 
+def test_governance_reschedule_schema_is_typed_and_asks(ai):
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "reschedule_appointment")
+    props = fn["parameters"]["properties"]
+    assert props["new_start"]["pattern"] == r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$"   # what parse_local accepts
+    assert set(fn["parameters"]["required"]) == set(props)
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
+    # no other tool takes a caller-supplied value: the manage tools act on the id in the SWML URL
+    others = {f["function"]: f["parameters"]["properties"] for f in ai["SWAIG"]["functions"]}
+    assert {k for k, v in others.items() if v} == {"confirm_identity", "reschedule_appointment"}
+    manage = next(s for s in ai["prompt"]["contexts"]["default"]["steps"] if s["name"] == "manage")
+    assert "ask for the new date and the time" in manage["text"]
+    assert "Never assume the date is today" in manage["text"]
+    # "today" for the model is the contact's day: A-0101 is in New York in appointments.csv
+    assert ai["params"]["local_tz"] == "America/New_York"
+
+
 def test_call_window_is_configurable(monkeypatch):
     monkeypatch.setattr(config, "CALL_WINDOW", "09:00-17:00")
     call, _ = dialer.plan(datetime(2027, 1, 11, 13, 30, tzinfo=UTC))   # 08:30 NY
