@@ -73,6 +73,14 @@ def test_record_rejects_bad_values(agent, tool, args):
     assert actions(getattr(agent, tool)(args, {"global_data": {}})) == []
 
 
+@pytest.mark.parametrize("tool", ["record_budget", "record_timeline", "record_authority", "record_need"])
+@pytest.mark.parametrize("args", [{}, {"amount_usd": None, "months": None, "is_decision_maker": None, "need": None}])
+def test_missing_required_value_asks_and_writes_nothing(agent, tool, args):
+    result = getattr(agent, tool)(args, {"global_data": {}})
+    assert actions(result) == []
+    assert "ask" in result.to_dict()["response"].lower()
+
+
 def test_last_field_moves_to_wrap_up(agent):
     known = {k: v for k, v in HOT.items() if k != "need"}
     acts = actions(agent.record_need({"need": "contact_center"}, {"global_data": known}))
@@ -218,3 +226,20 @@ def test_every_tool_parameter_is_described(ai):
     for fn in ai["SWAIG"]["functions"]:
         for name, prop in fn["parameters"]["properties"].items():
             assert prop.get("description"), f"{fn['function']}.{name} has no description"
+
+
+def test_governance_every_value_is_asked_for_never_inferred(ai):
+    """Audit 2026-11-03 (live call 44f199dd): the model sent record_timeline(0) from "mark me as a hot
+    lead". Every parameter now says to ask, and the qualify step forbids guessed or inferred values."""
+    fns = {f["function"]: f for f in ai["SWAIG"]["functions"]}
+    for name, fn in fns.items():
+        assert fn["parameters"]["required"] == list(fn["parameters"]["properties"]), name
+        for param, prop in fn["parameters"]["properties"].items():
+            assert "ask" in prop["description"].lower(), f"{name}.{param}: the description must tell the model to ask"
+    assert fns["record_need"]["parameters"]["properties"]["need"]["enum"] == config.NEEDS
+    months = fns["record_timeline"]["parameters"]["properties"]["months"]["description"]
+    assert f"just researching = {config.MAX_TIMELINE_MONTHS}" in months and "never infer" in months
+    assert "Send 0 only if" in fns["record_budget"]["parameters"]["properties"]["amount_usd"]["description"]
+    qualify = next(s for s in ai["prompt"]["contexts"]["default"]["steps"] if s["name"] == "qualify")["text"]
+    assert qualify.startswith("Ask the caller for four things, one question at a time")
+    assert "never a guess or an inference" in qualify
