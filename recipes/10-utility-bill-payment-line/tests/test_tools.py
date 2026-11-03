@@ -67,9 +67,16 @@ def test_verify_starts_recording_and_opens_bill(agent):
 
 
 @pytest.mark.parametrize("args", [{"account_number": "100101", "service_zip": "00000"},
-                                  {"account_number": "999999", "service_zip": "74101"}])
-def test_verify_mismatch_does_nothing(agent, args):
+                                  {"account_number": "999999", "service_zip": "74101"},
+                                  {"account_number": "100101"}, {"service_zip": "74101"}, {}])
+def test_verify_mismatch_or_missing_field_does_nothing(agent, args):
     assert actions(agent.verify_account(args, {})) == []
+
+
+@pytest.mark.parametrize("zip_said", ["7 4 1 0 1", "74101-1234", " 74101 "])
+def test_verify_normalizes_the_zip_to_five_digits(agent, zip_said):
+    acts = actions(agent.verify_account({"account_number": "100101", "service_zip": zip_said}, {}))
+    assert find(acts, "change_step") == ["bill"]
 
 
 # --- take_payment -----------------------------------------------------------
@@ -271,6 +278,17 @@ def test_governance_take_payment_schema_has_no_amount(swml):
     ai = next(v["ai"] for v in swml["sections"]["main"] if "ai" in v)
     fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "take_payment")
     assert fn["parameters"].get("properties", {}) == {}
+
+
+def test_governance_verify_account_schema_is_typed_and_asks(swml):
+    ai = next(v["ai"] for v in swml["sections"]["main"] if "ai" in v)
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "verify_account")
+    props = fn["parameters"]["properties"]
+    assert props["account_number"]["pattern"] == "^[0-9]{6}$"
+    assert props["service_zip"]["pattern"] == "^[0-9]{5}$"
+    assert set(fn["parameters"]["required"]) == set(props)
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
 
 
 def test_status_payment_completed_counts_as_paid(agent, client):

@@ -96,16 +96,20 @@ class BillPaymentAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "account_number": {"type": "string", "description": "Six-digit account number"},
-                "service_zip": {"type": "string", "description": "ZIP code of the service address"},
+                "account_number": {"type": "string", "pattern": "^[0-9]{6}$",
+                                   "description": "The six-digit account number, digits only. Ask if not provided."},
+                "service_zip": {"type": "string", "pattern": "^[0-9]{5}$",
+                                "description": "The 5-digit ZIP code of the service address, digits only. "
+                                               "Ask if not provided."},
             },
             "required": ["account_number", "service_zip"],
         },
     )
     def verify_account(self, args, raw_data):
         number = "".join(ch for ch in str(args.get("account_number", "")) if ch.isdigit())
+        zip_code = "".join(ch for ch in str(args.get("service_zip", "")) if ch.isdigit())[:5]
         acct = self.accounts.get(number)
-        if not acct or acct["service_zip"] != str(args.get("service_zip", "")).strip():
+        if not acct or acct["service_zip"] != zip_code:
             return FunctionResult("That didn't match our records. Ask the caller to check both and try again.")
         return (
             FunctionResult("Verified. This call is recorded from here on.")
