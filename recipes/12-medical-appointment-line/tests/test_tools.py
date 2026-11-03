@@ -6,6 +6,7 @@
 2. Governance assertions run against the SWML exactly as swaig-test dumps it.
 """
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,7 @@ RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
 
 import config  # noqa: E402
-from app import MedicalAppointmentAgent  # noqa: E402
+from app import DAYS, SLOT_ID, MedicalAppointmentAgent, load_slots  # noqa: E402
 
 SCHEDULING_TOOLS = {"find_slots", "book_slot", "hold_slot"}
 
@@ -134,6 +135,15 @@ def test_hold_slot_holds_and_wraps_up(agent):
     assert "record_call" not in swml_verbs(acts)
 
 
+@pytest.mark.parametrize("args", [{}, {"slot_id": ""}, {"slot_id": None}])
+def test_missing_slot_id_asks_and_takes_nothing(agent, args):
+    for tool, raw in ((agent.book_slot, GRANTED), (agent.hold_slot, DECLINED)):
+        result = tool(args, raw)
+        assert actions(result) == []
+        assert "ask" in result.to_dict()["response"].lower()
+    assert agent.taken == set()
+
+
 # --- audit record -----------------------------------------------------------
 
 def test_on_summary_writes_audit_with_disclosure_version(agent, tmp_path, monkeypatch):
@@ -209,3 +219,23 @@ def test_governance_wrap_up_has_no_navigation(swml):
     """Regression (live call 5527f302): wrap_up had no valid_steps, so the model got a next_step
     tool, called next_step("next") nine times ("next not found"), and the platform flagged a loop."""
     assert steps_of(swml)["wrap_up"]["valid_steps"] == []
+
+
+def test_governance_scheduling_schema_is_typed_and_asks(swml):
+    """Audit 2026-11-03: `day` was a free string matched against the slot file's weekday names, slot
+    ids had no shape, and schedule_limited never told the model to ask which day the caller wants."""
+    ai = next(v["ai"] for v in swml["sections"]["main"] if "ai" in v)
+    fns = {f["function"]: f for f in ai["SWAIG"]["functions"]}
+    day = fns["find_slots"]["parameters"]["properties"]["day"]
+    assert day["enum"] == DAYS and set(DAYS) == {s["day"] for s in load_slots()}
+    for name in ("book_slot", "hold_slot"):
+        assert fns[name]["parameters"]["properties"]["slot_id"]["pattern"] == SLOT_ID["pattern"]
+        assert fns[name]["parameters"]["required"] == ["slot_id"]
+    assert re.fullmatch(SLOT_ID["pattern"], "S-0101") and not re.fullmatch(SLOT_ID["pattern"], "S-01")
+    for name, fn in fns.items():
+        for param, prop in fn["parameters"]["properties"].items():
+            assert "ask" in prop["description"].lower(), f"{name}.{param}: the description must tell the model to ask"
+    steps = steps_of(swml)
+    for name in ("schedule", "schedule_limited"):
+        assert "Ask which day suits the caller" in steps[name]["text"], name
+        assert "Never pick a day or a slot the caller did not choose" in steps[name]["text"], name
