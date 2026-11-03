@@ -32,6 +32,8 @@ def configure(query_params, body_params, headers, agent):
     if contact:
         agent.set_global_data({"appointment_id": contact["appointment_id"],
                                "first_name": contact["first_name"]})
+        if contact.get("timezone"):      # the model's "today" is the contact's day, not the platform's
+            agent.set_param("local_tz", contact["timezone"])
 
 
 class ReminderAgent(AgentBase):
@@ -58,8 +60,10 @@ class ReminderAgent(AgentBase):
         ctx.add_step("manage") \
             .set_text(
                 "Remind them of ${global_data.appointment.summary} on ${global_data.appointment.when}. "
-                "Ask if they can make it. Use confirm_appointment, reschedule_appointment, "
-                "cancel_appointment, or opt_out if they ask not to be called again."
+                "Ask if they can make it. Use confirm_appointment, cancel_appointment, or opt_out if "
+                "they ask not to be called again. If they want to move it, ask for the new date and "
+                "the time, one at a time, read them back, then call reschedule_appointment. Never "
+                "assume the date is today."
             ) \
             .set_functions(["confirm_appointment", "reschedule_appointment",
                             "cancel_appointment", "opt_out"]) \
@@ -101,7 +105,11 @@ class ReminderAgent(AgentBase):
         name="reschedule_appointment",
         description="Move the appointment to a new local date and time the contact asked for.",
         parameters={"type": "object", "properties": {
-            "new_start": {"type": "string", "description": "Local time, YYYY-MM-DD HH:MM (24h)"},
+            "new_start": {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$",
+                          "description": "New local date and time the contact asked for, YYYY-MM-DD "
+                                         "HH:MM (24h), e.g. 2026-11-19 14:30. Ask for the date and the "
+                                         "time; read both back before calling. Never assume the date "
+                                         "is today."},
         }, "required": ["new_start"]},
     )
     def reschedule_appointment(self, args, raw_data):
