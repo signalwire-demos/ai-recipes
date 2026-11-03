@@ -135,6 +135,31 @@ def test_dispatch_non_emergency_opens_ticket():
     assert actions(r) == [] and records()[0]["kind"] == "service_request"
 
 
+def test_dispatch_emergency_needs_no_address_or_issue(monkeypatch):
+    at(monkeypatch, "03:00", weekday=6)
+    r = app.dispatch_technician(tenant("hvac"), {"emergency": True})
+    assert swml_verbs(r) == [{"connect": {"to": "+15550122"}}] and not config.MESSAGES_FILE.exists()
+
+
+@pytest.mark.parametrize("handler,tid,args", [
+    (app.take_message, "law", {"caller_name": "Sam", "message": "call me"}),                  # no callback_number
+    (app.take_message, "law", {"caller_name": "Sam", "callback_number": " ", "message": "call me"}),
+    (app.take_message, "default", {"callback_number": "5550142000", "message": "call me"}),   # no caller_name
+    (app.book_appointment, "dental", {"patient_name": "Ana"}),                               # no reason
+    (app.request_consultation, "law", {"practice_area": "estate"}),                          # no name
+    (app.request_consultation, "law", {"name": "Bo"}),                                       # no practice_area
+    (app.dispatch_technician, "hvac", {"address": "1 Elm", "issue": "no heat"}),             # no emergency flag
+    (app.dispatch_technician, "hvac", {"address": "1 Elm", "issue": "no heat", "emergency": "yes"}),
+    (app.dispatch_technician, "hvac", {"issue": "noisy", "emergency": False}),               # no address
+    (app.dispatch_technician, "hvac", {"address": "1 Elm", "emergency": False}),             # no issue
+])
+def test_missing_required_field_asks_and_writes_nothing(handler, tid, args):
+    cfg = config.DEFAULT_TENANT if tid == "default" else tenant(tid)
+    r = handler(cfg, args)
+    assert actions(r) == [] and not config.MESSAGES_FILE.exists()
+    assert "ask" in r.to_dict()["response"].lower() or "handles" in r.to_dict()["response"]  # says what to ask
+
+
 def test_transfer_open_connects_to_yaml_number(monkeypatch):
     at(monkeypatch, "10:00")
     r = app.transfer_call(tenant("dental"), {"target": "front_desk"})
@@ -209,3 +234,32 @@ def test_governance_other_tenants_cannot_execute_tool(tool, owner):
             assert "not found in agent" not in out.stdout + out.stderr
         else:
             assert out.returncode != 0 and "not found in agent" in out.stdout + out.stderr
+
+
+def dumped_ai(tid):
+    """The ai verb exactly as swaig-test dumps it; tid=None is an unmatched call (the default tenant)."""
+    out = swaig_test("--dump-swml", "--raw", *(("--query-params", json.dumps({"tenant": tid})) if tid else ()))
+    return next(v["ai"] for v in json.loads(out.stdout)["sections"]["main"] if "ai" in v)
+
+
+def schema_of(ai, name):
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == name)
+    return fn["parameters"]["properties"], fn["parameters"].get("required", [])
+
+
+@pytest.mark.parametrize("tid", ["dental", "hvac", "law", None])
+def test_governance_schemas_are_typed_and_ask(tid):
+    ai = dumped_ai(tid)
+    for fn in ai["SWAIG"]["functions"]:
+        for name, prop in fn["parameters"]["properties"].items():
+            assert "ask" in prop["description"].lower(), f"{fn['function']}.{name}: must tell the model to ask"
+    assert "never fill in a value the caller did not give" in json.dumps(ai["prompt"]).lower()  # every tenant
+    props, required = schema_of(ai, "take_message")
+    assert props["callback_number"]["pattern"] == "^\\+?[0-9]{10,15}$" and set(required) == set(props)
+    if tid:
+        assert schema_of(ai, "check_hours")[0]["day"]["enum"] == app.DAYS
+    if tid == "law":
+        assert schema_of(ai, "request_consultation")[0]["practice_area"]["enum"] == tenant("law")["practice_areas"]
+    if tid == "hvac":
+        props, required = schema_of(ai, "dispatch_technician")
+        assert required == ["emergency"] and props["emergency"]["type"] == "boolean"
