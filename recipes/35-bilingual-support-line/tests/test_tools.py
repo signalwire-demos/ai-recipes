@@ -148,3 +148,13 @@ def test_governance_wrap_up_is_terminal(swml):
     # loop on it (seen live in #7, #10, #12, #13). The last step ends the flow.
     final = steps_of(swml)["wrap_up"]
     assert final["functions"] == [] and final["valid_steps"] == [] and final["end"] is True
+
+
+def test_governance_lookup_account_schema_is_typed_and_asks(swml):
+    fn = next(f for f in ai_of(swml)["SWAIG"]["functions"] if f["function"] == "lookup_account")
+    props = fn["parameters"]["properties"]
+    assert props["account_number"]["pattern"] == "^[0-9]{6}$"
+    assert props["zip"]["pattern"] == "^[0-9]{5}$"  # digits only, so a spoken ZIP+4 never reaches the handler
+    assert set(fn["parameters"]["required"]) == set(props)
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
