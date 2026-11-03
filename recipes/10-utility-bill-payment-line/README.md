@@ -17,20 +17,27 @@ went through, and says goodbye.
 Payment isolation (PCI pattern 5). Card digits never reach the model, the recording, or this
 app's logs:
 
-- `take_payment` has **no parameters**. Its handler reads the amount from
-  `global_data.account.balance_due`, which `verify_account` wrote from the billing record.
-  Whatever amount the model or caller says is ignored.
+- `take_payment` has **no parameters**. Its handler reads the amount from the billing record of
+  the account this call verified, which `verify_account` recorded on the server keyed by
+  `call_id` (`lockout.py`, `Sessions`, expiring after `VERIFIED_SESSION_SECS`). Whatever amount
+  the model or caller says is ignored, and so is request `global_data`: tool requests carry their
+  own copy, so a forged one could otherwise set the account or the amount. `global_data` holds
+  the account only for the step text.
 - The handler returns `stop_record_call()` **then** a transfer SWML that runs `pay` and transfers
   back to this agent at `/?pay_ref=<one-time ref>`. So the recording is paused before the first
   digit is pressed, and the AI isn't listening while the caller types. (`pay` can't run as an
   in-AI action: the platform rejects it with 409 "Wait for ai to finish".)
 - The model never hears the pay verb's result. `configure()` turns the one-time `pay_ref` back
-  into the account and starts the returning call at `after_payment`, whose one tool,
+  into the account (recording it on the server for the returning call's `call_id`) and starts
+  the returning call at `after_payment`, whose one tool,
   `resume_recording`, restarts the recording and says "went through" only on server-side
   evidence: the mock connector approved a charge carrying this call's `pay_ref`, or the
   platform's `status_url` reported `payment-completed` for this call. Anything else is
   reported as not paid.
 - `take_payment` exists only in the `bill` step, which only the `verify_account` handler opens.
+  Failed attempts are counted on the server (`lockout.py`) per account number, caller ID and
+  call, across calls, so redialing doesn't reset them: after `MAX_VERIFY_FAILURES` (3) that
+  account or phone can't verify for `VERIFY_LOCKOUT_SECS` (15 minutes) after the last failure.
 - The mock connector logs only the transaction id, amount and result. Its `/pay/status`
   callback keeps the event name per call and drops every card field. A test asserts that no
   card data shows up in any log output.
@@ -46,7 +53,7 @@ stateDiagram-v2
     after_payment --> wrap_up: resume_recording handler, record_call + swml_change_step
     wrap_up --> [*]
     note right of verify: tools = [verify_account], valid_steps = []
-    note right of bill: tools = [take_payment] (no params), amount from global_data
+    note right of bill: tools = [take_payment] (no params), amount from the server's billing record
     note right of pay: SWML pay verb, outside the AI; card goes to the connector only
     note right of after_payment: tools = [resume_recording], valid_steps = [], outcome from connector
     note right of wrap_up: tools = []
@@ -56,7 +63,8 @@ stateDiagram-v2
 |---|---|
 | `set_functions`, `set_valid_steps` | `app.py`, steps `verify`, `bill`, `after_payment`, `wrap_up` |
 | `record_call` + `update_global_data` + `swml_change_step` | `app.py`, `verify_account` handler |
-| `stop_record_call`, then `execute_swml([pay, transfer], transfer=True)` (amount from `global_data`) | `app.py`, `take_payment` handler |
+| Server-side failure count and lockout | `lockout.py`, used by `verify_account` |
+| `stop_record_call`, then `execute_swml([pay, transfer], transfer=True)` (amount from the billing record) | `app.py`, `take_payment` handler |
 | `set_dynamic_config_callback` + `set_initial_step("after_payment")` | `app.py`, `configure()` |
 | `record_call` (resume), outcome from connector approvals | `app.py`, `resume_recording` handler |
 | Payment connector + `status_url` | `connector.py`, `POST /pay` and `POST /pay/status` |
@@ -111,8 +119,8 @@ pytest -q
 swaig-test app.py --list-tools
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
 swaig-test app.py --exec verify_account --account_number 100101 --service_zip 74101
-swaig-test app.py --custom-data '{"global_data": {"account": {"id": "100101", "balance_due": "84.17"}}}' \
-    --exec take_payment --amount 1.00     # the 1.00 is ignored: charge_amount is 84.17
+swaig-test app.py --custom-data '{"global_data": {"account": {"id": "100101", "balance_due": "0.01"}}}' \
+    --exec take_payment     # refused: global_data is not proof of a verified call (pytest covers the pay path)
 ```
 
 ### Live test
@@ -151,8 +159,8 @@ docker compose up --build          # reads .env, serves on :3000
 
 Put it behind any HTTPS host and point the number at `https://USER:PASS@<host>/`.
 Serverless: the agent itself works on Lambda, but the `/pay/status` events, the connector's
-approvals and the pending `pay_ref`s are kept in memory per process. Move them to a shared
-store first.
+approvals, the pending `pay_ref`s, the verified calls and the verification failure counts are
+kept in memory per process. Move them to a shared store first.
 
 The platform's post-prompt payload (`/post_prompt`, sent at hangup even with no post_prompt
 configured) carries `SWMLVars.pay_payment_results`. That includes the masked card number, the
@@ -165,4 +173,5 @@ Open `config.py`: set `PAY_CONNECTOR_URL` to your processor's connector URL to r
 mock (it must speak the same request and response contract, which is described at the top of
 `connector.py`), and set `UTILITY_NAME`. Then point `ACCOUNTS_FILE` at your billing system, or
 replace `load_accounts()` in `app.py`. The pay prompts are tuned with `PAY_MAX_ATTEMPTS`,
-`PAY_SECURITY_CODE`, `PAY_POSTAL_CODE` and `PAY_CARD_TYPES`.
+`PAY_SECURITY_CODE`, `PAY_POSTAL_CODE` and `PAY_CARD_TYPES`. `MAX_VERIFY_FAILURES` and
+`VERIFY_LOCKOUT_SECS` set the verification lockout.

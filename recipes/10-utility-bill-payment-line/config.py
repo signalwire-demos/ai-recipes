@@ -24,6 +24,12 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+# .env.example ships SWML_BASIC_AUTH_PASSWORD=change-me. Anyone who has read this repo knows it,
+# and it guards the SWML, every tool and every route here, so never serve with it.
+if os.environ.get("SWML_BASIC_AUTH_PASSWORD", "").strip() == "change-me":
+    raise SystemExit("SWML_BASIC_AUTH_PASSWORD is still the .env.example placeholder: "
+                     "set a long random value (python -c 'import secrets; print(secrets.token_urlsafe(24))').")
+
 # The SDK builds its webhook URLs from SWML_PROXY_URL_BASE. Recipes use PUBLIC_URL.
 if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
     os.environ["SWML_PROXY_URL_BASE"] = os.environ["PUBLIC_URL"].rstrip("/")
@@ -33,6 +39,11 @@ UTILITY_NAME = "Example Power & Water"
 VOICE = "rime.spore"                         # any SignalWire TTS voice id
 LANGUAGE_CODE = "en-US"
 ACCOUNTS_FILE = HERE / "data" / "accounts.json"  # swap for your billing system
+# Failed verify_account attempts, counted per account, caller ID and call across calls (lockout.py).
+# After MAX_VERIFY_FAILURES that key is locked out until VERIFY_LOCKOUT_SECS after the last failure.
+MAX_VERIFY_FAILURES = 3
+VERIFY_LOCKOUT_SECS = int(os.environ.get("VERIFY_LOCKOUT_SECS", "900"))
+VERIFIED_SESSION_SECS = 3600   # how long a verified call keeps access to take_payment
 
 # Payment connector. Default: the mock connector this app serves at /pay (same tunnel).
 # Swap in your processor's connector URL here.
