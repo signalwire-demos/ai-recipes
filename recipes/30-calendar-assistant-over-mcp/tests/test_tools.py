@@ -299,6 +299,15 @@ def test_governance_rules_ask_for_the_day_and_the_reason(swml):
     assert "Call get_today first" not in prompt
 
 
+def test_governance_times_say_morning_or_afternoon(swml):
+    # Live calls 2026-11-03: the voice read "10 AM" as "ten em". Times are said with "in the
+    # morning" / "in the afternoon", and pronounce turns a stray AM/PM into the same words.
+    ai = next(v["ai"] for v in swml["sections"]["main"] if "ai" in v)
+    assert "'two in the afternoon'" in json.dumps(ai["prompt"]) and "Never say AM or PM" in json.dumps(ai["prompt"])
+    assert {"replace": "AM", "with": "in the morning"} in ai["pronounce"]
+    assert {"replace": "PM", "with": "in the afternoon"} in ai["pronounce"]
+
+
 def test_governance_calendar_tool_schemas_are_typed_and_ask(server):
     # The platform turns each MCP inputSchema into SWAIG parameters, so the reference server's
     # schemas carry the format/pattern keys and "ask" wording a local tool would.
