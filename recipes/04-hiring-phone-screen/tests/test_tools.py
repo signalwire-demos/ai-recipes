@@ -166,3 +166,13 @@ def test_governance_submit_tool_only_in_submit_step(ai):
     assert steps["submit"]["functions"] == ["submit_screen"]
     assert steps["wrap_up"]["functions"] == []
     assert ai["global_data"] == {"candidate_id": "C-0101"}
+
+
+def test_governance_start_date_prompt_pins_the_shape(ai):
+    questions = {q["key"]: q for q in steps_of(ai)["screen"]["gather_info"]["questions"]}
+    prompt = questions["earliest_start"]["prompt"]
+    assert "YYYY-MM-DD" in prompt and "ask which year" in prompt
+    assert questions["earliest_start"]["confirm"] is True   # the full date is read back
+    # submit_screen takes nothing from the model: no caller-supplied parameter to describe
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "submit_screen")
+    assert fn["parameters"]["properties"] == {}

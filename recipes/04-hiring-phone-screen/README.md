@@ -89,6 +89,8 @@ call `screen -> submit (gather_complete)`, and `submit_screen` moved it
 `submit -> wrap_up (webhook_action)`. The handler wrote `data/candidates/C-L1-a1.json`
 (`complete: true`, `work_authorized: true`, `years_experience: 6`, `earliest_start: "Monday,
 November 9"`, and the pay range and reason verbatim). The file name came from the dial URL.
+Since that call, the `earliest_start` entry in `config.QUESTIONS` carries a `prompt` that asks
+for a full YYYY-MM-DD date (that live answer had no year); not re-tested live.
 
 Without a phone:
 
@@ -114,6 +116,6 @@ object storage first.
 
 ## What to change first
 
-Open `config.py`: edit `QUESTIONS` (order, wording, `type`, and which ones need `confirm=True`),
-then `COMPANY_NAME` and `ROLE_TITLE`. Swap `CANDIDATES_DIR` for your applicant tracking system
-when you're ready.
+Open `config.py`: edit `QUESTIONS` (order, wording, `type`, a `prompt` that pins the answer's
+shape, and which ones need `confirm=True`), then `COMPANY_NAME` and `ROLE_TITLE`. Swap
+`CANDIDATES_DIR` for your applicant tracking system when you're ready.

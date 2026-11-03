@@ -37,13 +37,17 @@ LANGUAGE_CODE = "en-US"
 # The screen, in order. Each entry is passed straight to add_gather_question().
 # type: string | integer | number | boolean. confirm=True makes the agent read the
 # answer back and get a yes before it is saved (use it on answers that are easy to mishear).
+# prompt: extra instruction after the question. Gather answers take no format or pattern, so
+# this is where an answer's shape (a YYYY-MM-DD date, say) is pinned.
 QUESTIONS = [
     {"key": "work_authorized", "type": "boolean", "confirm": True,
      "question": "Are you legally authorized to work in the United States?"},
     {"key": "years_experience", "type": "integer",
      "question": "How many years of warehouse or logistics experience do you have?"},
     {"key": "earliest_start", "type": "string", "confirm": True,
-     "question": "What is the earliest date you could start?"},
+     "question": "What is the earliest date you could start?",
+     "prompt": "Submit a full calendar date as YYYY-MM-DD. If the candidate gives only a weekday "
+               "or a month and day, ask which year, then read the full date back."},
     {"key": "salary_range", "type": "string",
      "question": "What hourly pay range are you looking for?"},
     {"key": "why_this_role", "type": "string",
