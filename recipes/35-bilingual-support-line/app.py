@@ -75,8 +75,18 @@ class BilingualSupportAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "account_number": {"type": "string", "description": "Six-digit account number"},
-                "zip": {"type": "string", "description": "Five-digit service ZIP code"},
+                "account_number": {
+                    "type": "string",
+                    "description": "The caller's six-digit account number, digits only, e.g. 100234. "
+                                   "Ask if not provided; never guess it.",
+                    "pattern": "^[0-9]{6}$",
+                },
+                "zip": {
+                    "type": "string",
+                    "description": "Five-digit ZIP code of the service address, digits only, e.g. 74103 "
+                                   "(no ZIP+4). Ask if not provided; never guess it.",
+                    "pattern": "^[0-9]{5}$",
+                },
             },
             "required": ["account_number", "zip"],
         },
