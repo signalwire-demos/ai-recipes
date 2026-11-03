@@ -52,8 +52,9 @@ class SupportAgent(AgentBase):
     )
     def request_human(self, args, raw_data):
         issue, summary = str(args.get("issue", "")).strip(), str(args.get("summary", "")).strip()
-        if not issue:
-            return FunctionResult("Ask the caller what the problem is first.")
+        if not issue or not summary:      # both are required: the ticket is what the human reads
+            return FunctionResult("Ask the caller what the problem is first, then call request_human "
+                                  "with both an issue and a summary.")
         result = FunctionResult().update_global_data({"ticket": {"issue": issue, "summary": summary}})
         if rota.human_available() and config.HUMAN_NUMBER:
             return result.set_response("A specialist is free. Tell the caller you're connecting them.") \
@@ -66,7 +67,9 @@ class SupportAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "preferred_time": {"type": "string", "description": "e.g. 'today after 4pm'"},
+                "preferred_time": {"type": "string", "description": "When the caller wants to be called "
+                                   "back, in their own words (e.g. 'today after 4pm'). Ask if not "
+                                   "provided; do not guess a time."},
             },
             "required": ["preferred_time"],
         },
