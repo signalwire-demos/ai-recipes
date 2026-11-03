@@ -89,8 +89,16 @@ def test_busy_path_stores_ticket_and_moves_to_offer_callback(support):
     assert not find(acts, "SWML")
 
 
-def test_request_human_needs_an_issue(support):
-    assert actions(support.request_human({"issue": " "}, raw())) == []
+@pytest.mark.parametrize("args", [
+    {"issue": " "},                                   # no issue
+    {"issue": "no dial tone", "summary": " "},        # blank summary (required, was unchecked)
+    {"issue": "no dial tone"},                        # summary missing altogether
+])
+def test_request_human_enforces_both_required_fields(support, args):
+    result = support.request_human(args, raw())
+    assert actions(result) == []                      # no ticket in global_data, no connect, no step change
+    assert "ask the caller" in result.to_dict()["response"].lower()
+    assert store.load_all() == {}
 
 
 # --- schedule_callback -------------------------------------------------------
@@ -199,3 +207,14 @@ def test_governance_return_call_global_data_comes_from_the_store(tmp_path):
                                  "summary": "Since noon.", "preferred_time": "after 5pm"}
     assert steps_of(ai)["returning"]["functions"] == ["connect_human"]
     assert [f["function"] for f in ai["SWAIG"]["functions"]] == ["connect_human"]
+
+
+def test_governance_support_schemas_are_typed_and_ask():
+    fns = {f["function"]: f for f in dump("SupportAgent")["SWAIG"]["functions"]}
+    assert set(fns) == {"request_human", "schedule_callback"}
+    for fn in fns.values():                           # every required name is a property, and vice versa
+        assert set(fn["parameters"]["required"]) == set(fn["parameters"]["properties"])
+    # preferred_time is the one caller-supplied value (issue and summary are the model's own triage)
+    preferred = fns["schedule_callback"]["parameters"]["properties"]["preferred_time"]
+    assert "ask" in preferred["description"].lower() and "own words" in preferred["description"]
+    assert set(preferred) == {"type", "description"}  # free text: the worker never parses it
