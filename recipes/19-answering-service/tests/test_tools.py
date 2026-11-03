@@ -16,8 +16,9 @@ import pytest
 RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
 
+import app  # noqa: E402
 import config  # noqa: E402
-from app import AnsweringService, is_open, is_urgent, parse_hours  # noqa: E402
+from app import AnsweringService, is_open, is_urgent, parse_hours, phone_number  # noqa: E402
 
 TZ = ZoneInfo(config.TZ)
 WEDNESDAY_10AM = datetime(2026, 10, 28, 10, 0, tzinfo=TZ)
@@ -92,7 +93,12 @@ def agent():
     return AnsweringService(clock=clock(WEDNESDAY_10PM))
 
 
-DETAILS = {"name": "Pat Example", "callback_number": "5550142"}
+@pytest.fixture(autouse=True)
+def fresh_throttle():
+    app._last_sms.clear()
+
+
+DETAILS = {"name": "Pat Example", "callback_number": "412 555 0142"}
 
 
 def test_urgent_call_is_forwarded_to_on_call(agent):
@@ -109,7 +115,7 @@ def test_routine_call_texts_the_owner_with_caller_details(agent):
     (verb,) = verbs(result)
     sms = verb["send_sms"]
     assert sms["to_number"] == config.OWNER_NUMBER and sms["from_number"] == config.SMS_FROM
-    for detail in ("Pat Example", "5550142", "+15550142", "Quote for a new faucet"):
+    for detail in ("Pat Example", "+14125550142", "+15550142", "Quote for a new faucet"):
         assert detail in sms["body"]
     assert [a["change_step"] for a in acts(result) if "change_step" in a] == ["wrap_up"]
 
@@ -126,6 +132,38 @@ def test_short_callback_number_is_asked_for_again(agent):
     result = agent.submit_call({**DETAILS, "callback_number": "555", "message": "Quote for a faucet"}, {})
     assert acts(result) == []
     assert "callback_number" in result.to_dict()["response"]
+
+
+@pytest.mark.parametrize("said, e164", [
+    ("412-555-0142", "+14125550142"), ("1 (412) 555 0142", "+14125550142"), ("+14125550142", "+14125550142"),
+    ("+442071234567", "+442071234567"), ("5550142", None), ("call me back at the office", None),
+    ("012 555 0142", None), ("+1 412 555 0142 ext 9", None), ("sip:pat@example.com", None),
+])
+def test_callback_number_must_be_a_phone_number(said, e164):
+    assert phone_number(said) == e164
+
+
+def test_bad_callback_number_is_asked_again_and_not_texted(agent):
+    result = agent.submit_call({**DETAILS, "callback_number": "the usual one", "message": "Quote please"},
+                               {"caller_id_num": "+15550142"})
+    assert acts(result) == [] and "area code" in result.to_dict()["response"]
+
+
+def test_bad_callback_number_never_holds_up_an_emergency(agent):
+    result = agent.submit_call({**DETAILS, "callback_number": "the usual one", "message": "Gas leak!"}, {})
+    assert verbs(result)[0]["connect"]["to"] == config.ONCALL_NUMBER
+
+
+def test_owner_texts_are_throttled_per_caller_id(agent, monkeypatch):
+    message = {**DETAILS, "message": "Quote for a new faucet"}
+    first = agent.submit_call(message, {"caller_id_num": "+15550142"})
+    again = agent.submit_call(message, {"caller_id_num": "+15550142"})
+    other = agent.submit_call(message, {"caller_id_num": "+15550199"})
+    assert len(verbs(first)) == 1 and len(verbs(other)) == 1
+    assert verbs(again) == [] and "already reached" in again.to_dict()["response"]
+    assert [a["change_step"] for a in acts(again) if "change_step" in a] == ["wrap_up"]
+    later = app._last_sms["+15550142"] + config.SMS_THROTTLE_MINUTES * 60
+    assert app.sms_allowed("+15550142", now=later)     # the window passes, texting resumes
 
 
 # --- governance: read the SWML exactly as swaig-test dumps it ----------------------
