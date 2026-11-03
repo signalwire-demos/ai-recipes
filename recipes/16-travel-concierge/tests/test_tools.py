@@ -85,6 +85,10 @@ def test_transfer_action_has_booking_url_and_token(concierge):
 @pytest.mark.parametrize("args, says", [
     ({"destination": "atlantis", "travelers": 2, "month": "may"}, "don't offer"),
     ({"destination": "lisbon", "travelers": 40, "month": "may"}, "1 to"),
+    ({"destination": "lisbon", "travelers": "two", "month": "may"}, "1 to"),       # soft SDK validation: no int() crash
+    ({"destination": "lisbon", "travelers": "2 adults", "month": "may"}, "1 to"),
+    ({"destination": "lisbon", "travelers": None, "month": "may"}, "1 to"),
+    ({"destination": "lisbon", "travelers": 2, "month": " "}, "month"),           # required: never hand off blank
 ])
 def test_handoff_validates_before_transfer(concierge, args, says, tmp_store):
     result = concierge.handoff_to_booking(args, {})
@@ -313,3 +317,23 @@ def test_governance_booking_tools_take_no_trip_args_and_dump_rebuilds_global_dat
     assert s["done"]["functions"] == ["return_to_concierge"] and s["done"]["valid_steps"] == []
     assert ai["params"]["swaig_post_conversation"] is True
     assert "Option 2: departing December 11" in ai["params"]["static_greeting"]
+
+
+def test_governance_concierge_schemas_are_typed_and_ask(concierge):
+    ai = dump()
+    fns = {f["function"]: f for f in ai["SWAIG"]["functions"]}
+    for fn in fns.values():                           # every required name is a property, and vice versa
+        assert set(fn["parameters"]["required"]) == set(fn["parameters"]["properties"])
+        for name, prop in fn["parameters"]["properties"].items():
+            assert "ask" in prop["description"].lower(), f"{fn['function']}.{name}: must tell the model to ask"
+    # destination: an enum of the keys the handlers look up, on both tools
+    keys = list(concierge.destinations)
+    assert keys == ["lisbon", "kyoto", "reykjavik"]
+    assert fns["destination_info"]["parameters"]["properties"]["destination"]["enum"] == keys
+    props = fns["handoff_to_booking"]["parameters"]["properties"]
+    assert props["destination"]["enum"] == keys
+    assert props["travelers"]["type"] == "integer" and f"1 to {config.MAX_TRAVELERS}" in props["travelers"]["description"]
+    assert props["month"]["enum"][0] == "January" and props["month"]["enum"][-1] == "December"
+    assert len(props["month"]["enum"]) == 12 and "never assume the current month" in props["month"]["description"]
+    explore = steps(ai)["explore"]["text"]
+    assert "ask for the destination" in explore and "Never assume one traveler or the current month" in explore

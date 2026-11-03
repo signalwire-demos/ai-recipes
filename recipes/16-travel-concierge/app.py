@@ -7,6 +7,7 @@ one-time token in the transfer URL. The receiving agent's dynamic config callbac
 record and rebuilds its context. The booking tools read the destination and party size from
 global_data, never from model arguments. No transcript crosses either handoff.
 """
+import calendar
 import json
 from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
@@ -19,6 +20,13 @@ import handoff
 
 def load_destinations() -> dict:
     return json.loads(config.DESTINATIONS_FILE.read_text())
+
+
+# Tool schemas are built from the same data the handlers check, before the decorators run.
+MONTHS = list(calendar.month_name)[1:]
+DESTINATION = {"type": "string", "enum": list(load_destinations()),
+               "description": "Destination key, lowercase, e.g. lisbon. Ask the caller which destination "
+                              "if not provided."}
 
 
 def spoken(depart: str) -> str:
@@ -71,7 +79,10 @@ class ConciergeDesk(AgentBase):
         )
         self.set_global_data({"looked_up": []})
         self.define_contexts().add_context("default").add_step("explore") \
-            .set_text("Help the caller choose a trip. Hand off to booking when they're ready.") \
+            .set_text("Help the caller choose a trip. Before handing off, ask for the destination, the "
+                      "number of travelers and the month of travel, one at a time if needed, and read "
+                      "them back. Never assume one traveler or the current month. Then call "
+                      "handoff_to_booking.") \
             .set_functions(["destination_info", "handoff_to_booking"]) \
             .set_valid_steps([])
         self.set_dynamic_config_callback(self.from_booking)
@@ -99,8 +110,8 @@ class ConciergeDesk(AgentBase):
         return key, self.destinations.get(key)
 
     @AgentBase.tool(name="destination_info", description="Best time to visit and tips for a destination.",
-                    parameters={"type": "object", "required": ["destination"], "properties": {
-                        "destination": {"type": "string", "description": "e.g. lisbon"}}})
+                    parameters={"type": "object", "required": ["destination"],
+                                "properties": {"destination": DESTINATION}})
     def destination_info(self, args, raw_data):
         key, dest = self._find(args.get("destination"))
         if not dest:
@@ -112,17 +123,25 @@ class ConciergeDesk(AgentBase):
     @AgentBase.tool(name="handoff_to_booking", description="Hand the caller to the booking desk.",
                     parameters={"type": "object", "required": ["destination", "travelers", "month"],
                                 "properties": {
-                                    "destination": {"type": "string", "description": "e.g. lisbon"},
-                                    "travelers": {"type": "integer", "description": "Number of travelers"},
-                                    "month": {"type": "string", "description": "Month of travel"}}})
+                                    "destination": DESTINATION,
+                                    "travelers": {"type": "integer", "description": "Number of travelers, 1 to "
+                                                  f"{config.MAX_TRAVELERS}. Ask if not provided; never assume one."},
+                                    "month": {"type": "string", "enum": MONTHS,
+                                              "description": "Month of travel as the caller said it. Ask if not "
+                                                             "provided; never assume the current month."}}})
     def handoff_to_booking(self, args, raw_data):
         key, dest = self._find(args.get("destination"))
-        travelers = int(args.get("travelers") or 0)
+        try:
+            travelers = int(args.get("travelers") or 0)
+        except (TypeError, ValueError):       # SDK validation is soft: "two" must not crash the call
+            travelers = 0
         if not dest:
             return FunctionResult(f"We don't offer {args.get('destination')}. Ask where they'd like to go.")
         if not 1 <= travelers <= config.MAX_TRAVELERS:
             return FunctionResult(f"We book 1 to {config.MAX_TRAVELERS} travelers. Ask how many.")
         month = str(args.get("month") or "").strip().capitalize()
+        if not month:
+            return FunctionResult("Ask which month they want to travel.")
         looked = (raw_data.get("global_data") or {}).get("looked_up") or []
         # The summary is written here, from validated fields. It is not the model's prose.
         summary = (f"{travelers} traveler{'s' if travelers > 1 else ''} to {dest['name']} in {month}. "

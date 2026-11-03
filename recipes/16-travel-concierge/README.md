@@ -166,7 +166,7 @@ pytest -q
 swaig-test app.py --list-tools                       # the concierge (default agent)
 swaig-test app.py --route /booking --list-tools
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.prompt.contexts'
-swaig-test app.py --exec handoff_to_booking --destination lisbon --travelers 2 --month december
+swaig-test app.py --exec handoff_to_booking --destination lisbon --travelers 2 --month December
 swaig-test app.py --route /booking --dump-swml --raw --query-params '{"h": "<token from data/runtime/handoffs.json>"}' \
   | jq '.sections.main[-1].ai.global_data'          # tokens are one-time: the dump claims it
 ```
