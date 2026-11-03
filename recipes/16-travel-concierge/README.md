@@ -16,7 +16,8 @@ knows what was held and picks up from there.
 ## What it demonstrates
 
 The handoff carries context, but no transcript, in both directions. `handoff_to_booking`
-validates the trip, writes the summary itself from those validated fields, and saves
+validates the trip (a known destination, 1 to `MAX_TRAVELERS`, and a real month name, since the
+month ends up in the booking agent's prompt), writes the summary itself from those validated fields, and saves
 `{summary, trip, looked_up, call_id}` to a short-lived store (`handoff.py`, 30-minute TTL).
 Only an opaque, one-time token goes into the transfer URL (`/booking?h=<token>`). The booking
 agent's dynamic config callback (`from_handoff`) claims the record (read once, then deleted)

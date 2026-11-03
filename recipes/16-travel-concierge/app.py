@@ -10,7 +10,7 @@ global_data, never from model arguments. No transcript crosses either handoff.
 import calendar
 import json
 from datetime import datetime
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from signalwire import AgentBase, AgentServer, FunctionResult
 
@@ -33,6 +33,10 @@ def spoken(depart: str) -> str:
     """'2026-12-11 18:30' -> 'December 11 at 18:30', so the model matches what callers say."""
     when = datetime.strptime(depart, "%Y-%m-%d %H:%M")
     return f"{when:%B} {when.day} at {when:%H:%M}"
+
+
+# "december", "Dec", "sept" -> "December". Only a real month name reaches the booking prompt.
+MONTH_NAMES = {m.lower()[:n]: m for m in calendar.month_name[1:] for n in (3, len(m))} | {"sept": "September"}
 
 
 def money(amount: int) -> str:
@@ -60,7 +64,7 @@ def agent_url(agent: AgentBase, route: str, token: str) -> str:
     """Transfer target with basic auth, so the platform can fetch the other agent's SWML."""
     user, password = agent.get_basic_auth_credentials()[:2]
     parts = urlsplit(config.PUBLIC_URL)
-    netloc = f"{user}:{password}@{parts.netloc}"
+    netloc = f"{quote(user, safe='')}:{quote(password, safe='')}@{parts.netloc}"
     return urlunsplit((parts.scheme, netloc, route, f"h={token}", ""))
 
 
@@ -139,9 +143,9 @@ class ConciergeDesk(AgentBase):
             return FunctionResult(f"We don't offer {args.get('destination')}. Ask where they'd like to go.")
         if not 1 <= travelers <= config.MAX_TRAVELERS:
             return FunctionResult(f"We book 1 to {config.MAX_TRAVELERS} travelers. Ask how many.")
-        month = str(args.get("month") or "").strip().capitalize()
+        month = MONTH_NAMES.get(str(args.get("month") or "").strip().rstrip(".").lower())
         if not month:
-            return FunctionResult("Ask which month they want to travel.")
+            return FunctionResult("Ask which month they want to travel, e.g. December.")
         looked = (raw_data.get("global_data") or {}).get("looked_up") or []
         # The summary is written here, from validated fields. It is not the model's prose.
         summary = (f"{travelers} traveler{'s' if travelers > 1 else ''} to {dest['name']} in {month}. "
