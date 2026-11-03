@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -21,7 +22,7 @@ import rota  # noqa: E402
 import store  # noqa: E402
 from app import CallbackAgent, SupportAgent  # noqa: E402
 
-HUMAN, FROM, CALLER = "+15550142", "+15550143", "+15550100"
+HUMAN, FROM, CALLER = "+15550142", "+15550143", "+14125550100"
 TICKET = {"issue": "router drops wifi nightly", "summary": "Since Tuesday. Already rebooted twice."}
 
 
@@ -43,8 +44,8 @@ def callback():
     return CallbackAgent()
 
 
-def raw(gd=None):
-    return {"global_data": gd or {}, "call_id": "call-abc", "caller_id_num": CALLER}
+def raw(gd=None, caller=CALLER):
+    return {"global_data": gd or {}, "call_id": "call-abc", "caller_id_num": caller}
 
 
 def actions(result):
@@ -117,6 +118,44 @@ def test_schedule_callback_without_triage_writes_nothing(support):
     assert store.load_all() == {}
 
 
+@pytest.mark.parametrize("caller", [
+    "+19005550100", "+14129765555", "+18765550100",        # premium NPA, 976 exchange, Jamaica
+    "+447700900123", "+882345678901",                       # outside the allowed prefixes
+    "anonymous", "", "sip:mallory@evil.example", "4125550100", "+1412555010", "+10125550100",
+])
+def test_schedule_callback_refuses_numbers_it_wont_dial(support, caller):
+    result = support.schedule_callback({"preferred_time": "noon"}, raw({"ticket": TICKET}, caller))
+    assert store.load_all() == {} and not find(actions(result), "hangup")
+
+
+def test_allowed_prefixes_are_configurable(monkeypatch):
+    monkeypatch.setattr(config, "CALLBACK_ALLOWED_PREFIXES", ["+1", "+44"])
+    assert store.dialable("+447700900123") and store.dialable(CALLER)
+    monkeypatch.setattr(config, "CALLBACK_ALLOWED_PREFIXES", ["+44"])
+    assert not store.dialable(CALLER)
+
+
+def test_one_pending_callback_per_number(support):
+    support.schedule_callback({"preferred_time": "noon"}, raw({"ticket": TICKET}))
+    again = support.schedule_callback({"preferred_time": "4pm"}, raw({"ticket": TICKET}))
+    assert len(store.load_all()) == 1 and "already booked" in again.to_dict()["response"]
+
+
+def test_pending_queue_is_capped(support, monkeypatch):
+    monkeypatch.setattr(config, "MAX_PENDING_CALLBACKS", 2)
+    for n in ("+14125550101", "+14125550102", "+14125550103"):
+        result = support.schedule_callback({"preferred_time": "noon"}, raw({"ticket": TICKET}, n))
+    assert len(store.load_all()) == 2 and "full" in result.to_dict()["response"]
+
+
+def test_concurrent_bookings_get_distinct_ids():
+    numbers = [f"+1412555{n:04d}" for n in range(20)]
+    with ThreadPoolExecutor(8) as pool:
+        recs = list(pool.map(lambda n: store.create(n, "issue", "summary", "noon"), numbers))
+    assert sorted(r["id"] for r in recs) == [f"CB-{n:04d}" for n in range(1, 21)]
+    assert {r["number"] for r in store.load_all().values()} == set(numbers)
+
+
 # --- worker ------------------------------------------------------------------
 
 class FakeCalling:
@@ -144,6 +183,16 @@ def test_worker_dials_pending_into_callback_route(monkeypatch):
                                      "url": "https://u:p@example.ngrok.app/callback?id=CB-0001"}]
     assert store.get(rec["id"])["status"] == "dialing"
     assert callback_worker.sweep(client) == []   # not dialed twice
+
+
+def test_worker_rechecks_numbers_before_dialing(tmp_path):
+    """A record that reached the file some other way is refused, never dialed."""
+    config.CALLBACKS_FILE.write_text(json.dumps({"CB-0001": {
+        "id": "CB-0001", "number": "+19005550100", "issue": "x", "summary": "", "preferred_time": "now",
+        "status": "pending", "created_at": "x", "call_id": None}}))
+    client = FakeClient()
+    assert callback_worker.sweep(client) == [] and client.calling.calls == []
+    assert store.get("CB-0001")["status"] == "refused"
 
 
 # --- the return call ---------------------------------------------------------
