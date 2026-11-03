@@ -64,39 +64,79 @@ def test_open_ticket_needs_summary(agent):
 
 # --- billing ---------------------------------------------------------------
 
+ZIPS = {"INV-1001": "15213", "INV-1002": "15217", "INV-1003": "15222"}
+
+
+def lookup(agent, invoice_id, zip_code=None, failures=0):
+    zip_code = ZIPS.get(invoice_id, "00000") if zip_code is None else zip_code
+    return agent.get_invoice({"invoice_id": invoice_id, "zip_code": zip_code},
+                             {"global_data": {"billing_failures": failures}})
+
+
+def set_gd(result):
+    return next((a["set_global_data"] for a in result.to_dict().get("action", []) if "set_global_data" in a), {})
+
+
+def refund(agent, invoice_id, call_id="c1"):
+    """issue_refund as the platform calls it: global_data carries what get_invoice verified."""
+    return agent.issue_refund({}, {"call_id": call_id, "global_data": {"billing_verified": invoice_id}})
+
+
 def test_get_invoice(agent):
-    assert "$59.99, status paid" in text(agent.get_invoice({"invoice_id": "inv-1001"}, {}))
-    assert "can't find" in text(agent.get_invoice({"invoice_id": "INV-9"}, {}))
+    found = lookup(agent, "INV-1001")
+    assert "$59.99, status paid" in text(found) and set_gd(found) == {"billing_verified": "INV-1001"}
+    assert "don't match" in text(lookup(agent, "INV-9"))
 
 
 @pytest.mark.parametrize("spoken", ["Inv1001", "inv 1001", "INV-1001", "1001", "I.N.V. 1001"])
 def test_invoice_number_as_asr_hears_it(agent, spoken):
     # Regression: live call b9b47966 sent get_invoice("Inv1001") and got "can't find".
-    assert "$59.99" in text(agent.get_invoice({"invoice_id": spoken}, {}))
+    assert "$59.99" in text(agent.get_invoice({"invoice_id": spoken, "zip_code": "1 5 2 1 3"}, {}))
 
 
-def test_refund_accepts_asr_invoice_number(agent):
-    assert "Refunded $59.99" in text(agent.issue_refund({"invoice_id": "Inv1001"}, {"call_id": "c1"}))
-    assert json.loads(config.REFUNDS_FILE.read_text())["invoice_id"] == "INV-1001"
+@pytest.mark.parametrize("zip_code", ["15217", "00000"])
+def test_invoice_needs_its_own_billing_zip(agent, zip_code):
+    # Exploit: walk the sequential invoice numbers. Without the record's ZIP nothing is shown or unlocked.
+    result = lookup(agent, "INV-1001", zip_code=zip_code, failures=1)
+    assert "$59.99" not in text(result) and "don't match" in text(result)
+    assert set_gd(result) == {"billing_failures": 2}
+
+
+def test_blank_zip_is_asked_for_and_not_counted(agent):
+    result = lookup(agent, "INV-1001", zip_code="", failures=1)
+    assert "$59.99" not in text(result) and "ZIP" in text(result)
+    assert not set_gd(result)   # nothing was checked, so it isn't a failed attempt
+
+
+def test_lookups_stop_after_too_many_failures(agent):
+    result = lookup(agent, "INV-1001", failures=config.MAX_LOOKUP_FAILURES)   # right ZIP, too late
+    assert "Too many failed lookups" in text(result) and "$59.99" not in text(result)
+    assert set_gd(result) == {}
+
+
+def test_refund_needs_a_verified_invoice(agent):
+    # The model can't name the invoice: the schema has no arguments and extra ones are ignored.
+    out = text(agent.issue_refund({"invoice_id": "INV-1001"}, {"call_id": "c1"}))
+    assert "get_invoice first" in out and not config.REFUNDS_FILE.exists()
 
 
 def test_refund_uses_record_amount_and_is_idempotent(agent):
-    # The model can't pass an amount: the schema has none, and extra args are ignored.
-    agent.issue_refund({"invoice_id": "INV-1001", "amount": 5000}, {"call_id": "c2"})
+    agent.issue_refund({"invoice_id": "INV-1002", "amount": 5000},
+                       {"call_id": "c2", "global_data": {"billing_verified": "INV-1001"}})
     rows = [json.loads(x) for x in config.REFUNDS_FILE.read_text().splitlines()]
     assert rows == [{"invoice_id": "INV-1001", "amount": 59.99, "call_id": "c2"}]
-    assert "already been refunded" in text(agent.issue_refund({"invoice_id": "INV-1001"}, {}))
-    assert "status refunded" in text(agent.get_invoice({"invoice_id": "INV-1001"}, {}))
+    assert "already been refunded" in text(refund(agent, "INV-1001"))
+    assert "status refunded" in text(lookup(agent, "INV-1001"))
 
 
 def test_refund_over_limit_is_not_made(agent):
-    assert "need a billing manager" in text(agent.issue_refund({"invoice_id": "INV-1002"}, {}))
+    assert "need a billing manager" in text(refund(agent, "INV-1002"))
     assert not config.REFUNDS_FILE.exists()
 
 
 def test_refund_already_refunded_or_missing(agent):
-    assert "already been refunded" in text(agent.issue_refund({"invoice_id": "INV-1003"}, {}))
-    assert "no refund was made" in text(agent.issue_refund({"invoice_id": "INV-0000"}, {}))
+    assert "already been refunded" in text(refund(agent, "INV-1003"))
+    assert "no refund was made" in text(refund(agent, "INV-0000"))
     assert not config.REFUNDS_FILE.exists()
 
 
@@ -170,8 +210,8 @@ def test_governance_tool_schemas_are_typed_and_ask(ai):
     params = {f["function"]: f["parameters"] for f in ai["SWAIG"]["functions"]}
     assert params["get_plan_price"]["properties"]["plan"]["enum"] == list(load(config.PLANS_FILE))
     assert params["check_service_status"]["properties"]["service"]["enum"] == list(load(config.STATUS_FILE))
-    for tool in ("get_invoice", "issue_refund"):
-        assert params[tool]["properties"]["invoice_id"]["pattern"] == "^(INV-)?[0-9]{4}$"
+    assert params["get_invoice"]["properties"]["invoice_id"]["pattern"] == "^(INV-)?[0-9]{4}$"
+    assert params["get_invoice"]["properties"]["zip_code"]["pattern"] == "^[0-9]{5}$"
     for tool, p in params.items():
         assert set(p["required"]) == set(p["properties"]), tool
         for name, prop in p["properties"].items():
@@ -182,3 +222,9 @@ def test_governance_billing_role_requires_lookup_and_yes_before_refund(ai):
     role = next(s["body"] for s in ai["prompt"]["contexts"]["billing"]["pom"] if s["title"] == "Role")
     assert "Before issue_refund: call get_invoice" in role
     assert "read the amount back" in role and "explicit yes" in role
+
+
+def test_governance_refund_target_never_comes_from_the_model(ai):
+    fns = {f["function"]: f for f in ai["SWAIG"]["functions"]}
+    assert fns["issue_refund"]["parameters"].get("properties", {}) == {}
+    assert set(fns["get_invoice"]["parameters"]["required"]) == {"invoice_id", "zip_code"}
