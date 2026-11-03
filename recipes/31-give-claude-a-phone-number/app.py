@@ -7,6 +7,7 @@ voice-only and can't be listed or called over MCP. The handlers enforce their
 own rules (known account, business hours) because an MCP client has no steps,
 and they never return the CRM's internal fields on either channel.
 """
+import calendar
 import json
 import re
 from datetime import datetime
@@ -27,6 +28,16 @@ def normalize_phone(raw: str) -> str | None:
     return f"+1{digits}" if len(digits) == 10 else None
 
 
+def callback_window_text() -> str:
+    """The booking window the handler enforces, worded for the help step from the same config."""
+    days = list(config.CALLBACK_DAYS)
+    names = [calendar.day_name[d] for d in days]
+    contiguous = len(days) > 2 and days == list(range(days[0], days[-1] + 1))
+    span = f"{names[0]} to {names[-1]}" if contiguous else ", ".join(names)
+    start, end = config.CALLBACK_HOURS
+    return f"Callbacks run {span}, {start}:00 to {end}:00 local time."
+
+
 class PhoneAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="acme-support", route=config.ROUTE, port=config.PORT, **kwargs)
@@ -45,9 +56,11 @@ class PhoneAgent(AgentBase):
             .set_valid_steps([])  # only the lookup handler can move the call on
         ctx.add_step("help") \
             .set_text(
-                "The caller is ${global_data.name}, account ${global_data.account_id}. "
-                "Offer to book a callback (book_callback) or, if they insist on a person now, "
-                "call transfer_to_human."
+                callback_window_text()
+                + " The caller is ${global_data.name}, account ${global_data.account_id}. "
+                "Offer to book a callback. If they want one, ask for the day and then the time, "
+                "one at a time; never assume today or pick a slot yourself. Then call "
+                "book_callback. If they insist on a person now, call transfer_to_human."
             ) \
             .set_functions(["book_callback", "transfer_to_human"]) \
             .set_valid_steps([])
@@ -61,7 +74,12 @@ class PhoneAgent(AgentBase):
         description="Find a customer account by the phone number on the account.",
         parameters={
             "type": "object",
-            "properties": {"phone": {"type": "string", "description": "Phone number, any format"}},
+            "properties": {
+                "phone": {"type": "string", "pattern": r"^(\+?1)?\d{10}$",
+                          "description": "The phone number on the caller's account, 10 US digits with "
+                                         "no punctuation, e.g. 5555550101. Ask the caller for it; never "
+                                         "use the caller ID."},
+            },
             "required": ["phone"],
         },
     )
@@ -82,9 +100,17 @@ class PhoneAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "account_id": {"type": "string", "description": "Account id, e.g. ACME-1001"},
-                "when": {"type": "string", "description": "Local date and time, YYYY-MM-DD HH:MM"},
-                "reason": {"type": "string", "description": "Short reason for the callback"},
+                "account_id": {"type": "string",
+                               "description": "The account_id returned by lookup_customer "
+                                              "(global_data.account_id), e.g. ACME-1001. Never ask the "
+                                              "caller for it or invent one."},
+                "when": {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$",
+                         "description": "Callback date and time, local, 24-hour clock, exactly "
+                                        "YYYY-MM-DD HH:MM (e.g. 2026-11-10 14:30). Ask the caller for "
+                                        "the day and the time; never assume today or pick a slot yourself."},
+                "reason": {"type": "string",
+                           "description": "Short reason for the callback, in the caller's own words. "
+                                          "Ask if not provided."},
             },
             "required": ["account_id", "when"],
         },
