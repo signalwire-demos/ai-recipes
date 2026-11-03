@@ -63,7 +63,7 @@ git clone https://github.com/signalwire-demos/ai-recipes
 cd ai-recipes/recipes/<nn-slug>
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt     # pins signalwire-sdk
-cp .env.example .env                # fill in values
+cp .env.example .env                # fill in values (apps refuse the change-me password)
 python app.py                       # serves SWML on :3000
 ngrok http 3000                     # or: docker compose up
 ```
