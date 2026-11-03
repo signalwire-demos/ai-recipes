@@ -60,7 +60,9 @@ class SalesCopilot(SWMLService):
         self.define_tool(
             name="flag_objection",
             description="Report a customer objection or concern. Pass the customer's exact words.",
-            parameters={"customer_quote": {"type": "string", "description": "What the customer said, verbatim"}},
+            parameters={"customer_quote": {"type": "string", "description": (
+                "The customer's most recent words, quoted exactly as spoken. Not paraphrased, and never "
+                "the rep's words.")}},
             required=["customer_quote"],
             handler=self.flag_objection,
             secure=False,  # the sidecar has no per-call token; basic auth in web_hook_url guards /swaig

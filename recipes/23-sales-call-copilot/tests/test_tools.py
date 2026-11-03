@@ -183,6 +183,17 @@ def test_governance_sidecar_has_exactly_one_tool(swml):
     assert side["SWAIG"]["defaults"]["web_hook_url"].endswith("/swaig")
 
 
+def test_governance_flag_objection_wants_the_customers_exact_words(swml):
+    """The sidecar can't ask: its one parameter must be the customer's own words, not a paraphrase."""
+    fn = next(f for f in verb(swml, "ai_sidecar")["SWAIG"]["functions"] if f["function"] == "flag_objection")
+    props = fn["parameters"]["properties"]
+    assert list(props) == ["customer_quote"] and fn["parameters"]["required"] == ["customer_quote"]
+    assert props["customer_quote"]["type"] == "string"
+    desc = props["customer_quote"]["description"].lower()
+    assert "most recent" in desc and "exactly as spoken" in desc
+    assert "not paraphrased" in desc and "never the rep" in desc
+
+
 def test_governance_model_never_sees_the_playbook(swml):
     dumped = json.dumps(swml)
     for spec in config.PLAYBOOK.values():
