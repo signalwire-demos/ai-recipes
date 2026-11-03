@@ -112,6 +112,12 @@ def test_open_dispute_writes_record(agent):
     assert record["transaction_id"] == "T-9005" and record["account_id"] == "ACC-0101"
 
 
+def test_open_dispute_without_a_reason_writes_nothing(agent):
+    result = agent.open_dispute({"transaction_id": "T-9005", "reason": " "}, VERIFIED)
+    assert actions(result) == [] and "why" in result.to_dict()["response"]
+    assert not config.DISPUTES_FILE.exists()
+
+
 def test_open_dispute_rejects_other_accounts_transaction(agent):
     text = agent.open_dispute({"transaction_id": "T-9101", "reason": "x"}, VERIFIED).to_dict()["response"]
     assert "isn't on this account" in text
@@ -140,13 +146,21 @@ def swaig_test_bin() -> str:
 
 
 @pytest.fixture(scope="module")
-def steps():
+def ai():
     out = subprocess.run(
         [swaig_test_bin(), str(RECIPE / "app.py"), "--dump-swml", "--raw"],
         capture_output=True, text=True, check=True, cwd=RECIPE,
     ).stdout
-    ai = next(v["ai"] for v in json.loads(out)["sections"]["main"] if "ai" in v)
+    return next(v["ai"] for v in json.loads(out)["sections"]["main"] if "ai" in v)
+
+
+@pytest.fixture(scope="module")
+def steps(ai):
     return {s["name"]: s for s in ai["prompt"]["contexts"]["default"]["steps"]}
+
+
+def schema_of(ai, name):
+    return next(f for f in ai["SWAIG"]["functions"] if f["function"] == name)["parameters"]
 
 
 ACCOUNT_TOOLS = {"get_balance", "list_transactions", "open_dispute"}
@@ -168,3 +182,23 @@ def test_governance_no_step_can_navigate_back_into_the_account_menu(steps):
     for name in ("wrap_up", "escalate"):
         assert steps[name]["valid_steps"] == []
     assert steps["escalate"]["functions"] == ["escalate_call"]
+
+
+def test_governance_schemas_are_typed_and_ask(ai):
+    verify = schema_of(ai, "verify_identity")
+    assert verify["properties"]["date_of_birth"]["format"] == "date"
+    assert verify["properties"]["account_number"]["pattern"] == "^[0-9]+$"
+    assert set(verify["required"]) == set(verify["properties"])
+    dispute = schema_of(ai, "open_dispute")
+    assert dispute["properties"]["transaction_id"]["pattern"] == "^T-[0-9]+$"
+    assert set(dispute["required"]) == set(dispute["properties"])
+    for schema in (verify, dispute):
+        for name, prop in schema["properties"].items():
+            assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
+    count = schema_of(ai, "list_transactions")["properties"]["count"]
+    assert count["default"] == 3 and f"1 to {config.MAX_TRANSACTIONS}" in count["description"]
+
+
+def test_governance_account_menu_says_to_list_and_ask_before_disputing(steps):
+    text = steps["account_menu"]["text"]
+    assert "call list_transactions" in text and "ask which transaction and why" in text

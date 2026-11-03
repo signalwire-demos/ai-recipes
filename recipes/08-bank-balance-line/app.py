@@ -14,6 +14,7 @@ import config
 import crm
 
 DOB_FORMATS = ["%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%B %d %Y", "%b %d %Y", "%d %B %Y"]
+DEFAULT_TRANSACTIONS = 3  # list_transactions when the caller doesn't say how many
 
 
 def normalize_dob(text: str) -> str | None:
@@ -53,7 +54,8 @@ class BankBalanceAgent(AgentBase):
         ctx.add_step("account_menu") \
             .set_text(
                 "The caller is verified as ${global_data.customer.name}. Help with their balance, "
-                "recent transactions, or disputing a transaction. When they are done, move to wrap_up."
+                "recent transactions, or disputing a transaction. To dispute, call list_transactions, "
+                "ask which transaction and why, then call open_dispute. When they are done, move to wrap_up."
             ) \
             .set_functions(["get_balance", "list_transactions", "open_dispute"]) \
             .set_valid_steps(["wrap_up"])
@@ -77,8 +79,12 @@ class BankBalanceAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "account_number": {"type": "string", "description": "The account number, digits only"},
-                "date_of_birth": {"type": "string", "description": "Date of birth as the caller said it"},
+                "account_number": {"type": "string", "pattern": "^[0-9]+$",
+                                   "description": "The account number, digits only. Ask if not provided."},
+                "date_of_birth": {"type": "string", "format": "date",
+                                  "description": "Date of birth as YYYY-MM-DD, converted from what the caller "
+                                                 "says (e.g. 'March 14th 1985' -> 1985-03-14). Ask if not "
+                                                 "provided; never guess it."},
             },
             "required": ["account_number", "date_of_birth"],
         },
@@ -129,7 +135,10 @@ class BankBalanceAgent(AgentBase):
         description="List the verified caller's most recent transactions, newest first.",
         parameters={
             "type": "object",
-            "properties": {"count": {"type": "integer", "description": "How many to list"}},
+            "properties": {"count": {
+                "type": "integer", "default": DEFAULT_TRANSACTIONS,
+                "description": f"How many transactions to read out, 1 to {config.MAX_TRANSACTIONS}. "
+                               f"Omit for the default of {DEFAULT_TRANSACTIONS}."}},
         },
     )
     def list_transactions(self, args, raw_data):
@@ -137,9 +146,9 @@ class BankBalanceAgent(AgentBase):
         if not acct:
             return FunctionResult("The caller is not verified.")
         try:
-            count = int(args.get("count") or 3)
+            count = int(args.get("count") or DEFAULT_TRANSACTIONS)
         except (TypeError, ValueError):
-            count = 3
+            count = DEFAULT_TRANSACTIONS
         count = max(1, min(count, config.MAX_TRANSACTIONS))
         lines = [
             f"{t['id']}: {t['date']}, {t['description']}, "
@@ -154,8 +163,12 @@ class BankBalanceAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "transaction_id": {"type": "string", "description": "Transaction id, e.g. T-9005"},
-                "reason": {"type": "string", "description": "Why the caller disputes it"},
+                "transaction_id": {"type": "string", "pattern": "^T-[0-9]+$",
+                                   "description": "The transaction id exactly as returned by list_transactions, "
+                                                  "e.g. T-1234. Call list_transactions and ask the caller "
+                                                  "which one if not already known."},
+                "reason": {"type": "string",
+                           "description": "The caller's reason for the dispute, in their words. Ask if not provided."},
             },
             "required": ["transaction_id", "reason"],
         },
@@ -165,9 +178,12 @@ class BankBalanceAgent(AgentBase):
         if not acct:
             return FunctionResult("The caller is not verified.")
         txn_id = str(args.get("transaction_id", "")).strip().upper()
+        reason = str(args.get("reason", "")).strip()
         if txn_id not in {t["id"] for t in acct["transactions"]}:
             return FunctionResult("That transaction isn't on this account. List transactions and ask which one.")
-        ref = crm.open_dispute(acct["id"], txn_id, str(args.get("reason", "")).strip())
+        if not reason:
+            return FunctionResult("Ask the caller why they dispute this transaction, then call open_dispute again.")
+        ref = crm.open_dispute(acct["id"], txn_id, reason)
         return FunctionResult(f"Dispute {ref} opened on {txn_id}. A specialist reviews it within 10 business days.")
 
     # --- escalate step -------------------------------------------------------
