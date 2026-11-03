@@ -18,7 +18,7 @@ import pytest
 RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
 
-from app import TemplateAgent  # noqa: E402
+from app import DAYS, TemplateAgent  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -85,3 +85,13 @@ def test_governance_model_cannot_leave_lookup(swml):
     lookup = steps_of(swml)["lookup"]
     assert lookup["functions"] == ["check_hours"]
     assert lookup["valid_steps"] == []  # no next_step tool: only the handler moves the call
+
+
+def test_governance_check_hours_schema_is_typed_and_asks(swml):
+    ai = next(v["ai"] for v in swml["sections"]["main"] if "ai" in v)
+    fn = next(f for f in ai["SWAIG"]["functions"] if f["function"] == "check_hours")
+    props = fn["parameters"]["properties"]
+    assert props["day"]["enum"] == DAYS  # the same list the handler checks
+    assert set(fn["parameters"]["required"]) == set(props)
+    for name, prop in props.items():
+        assert "ask" in prop["description"].lower(), f"{name}: the description must tell the model to ask"
