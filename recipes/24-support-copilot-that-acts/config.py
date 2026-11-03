@@ -24,6 +24,12 @@ def _load_env_files() -> None:
 
 _load_env_files()
 
+# .env.example ships SWML_BASIC_AUTH_PASSWORD=change-me. Anyone who has read this repo knows it,
+# and it guards the SWML, every tool and every route here, so never serve with it.
+if os.environ.get("SWML_BASIC_AUTH_PASSWORD", "").strip() == "change-me":
+    raise SystemExit("SWML_BASIC_AUTH_PASSWORD is still the .env.example placeholder: "
+                     "set a long random value (python -c 'import secrets; print(secrets.token_urlsafe(24))').")
+
 # The SDK builds its webhook URLs from SWML_PROXY_URL_BASE. Recipes use PUBLIC_URL.
 if os.environ.get("PUBLIC_URL") and not os.environ.get("SWML_PROXY_URL_BASE"):
     os.environ["SWML_PROXY_URL_BASE"] = os.environ["PUBLIC_URL"].rstrip("/")
@@ -65,4 +71,8 @@ FROM_NUMBER = os.environ.get("FROM_NUMBER") or os.environ.get("OUTBOUND_2") or "
 PORT = int(os.environ.get("PORT", "3000"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", f"http://localhost:{PORT}").rstrip("/")
 WEB_DIR = HERE / "web"
+# The rep page's own login, separate from SWML_BASIC_AUTH_*. That platform credential also
+# opens /swaig (the sidecar's tools), so reps never get it. Blank REP_PASSWORD = page locked.
+REP_USER = os.environ.get("REP_USER", "rep")
+REP_PASSWORD = os.environ.get("REP_PASSWORD", "")
 FEED_SIZE = 200              # cards kept in memory for the rep page

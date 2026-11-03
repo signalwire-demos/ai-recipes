@@ -36,12 +36,25 @@ def svc():
     return SupportCopilot()
 
 
+REP = ("rep", "rep-only-secret")
+PHONES = {"A-1001": "+15550111", "A-1002": "+15550112", "A-1003": "+15550113"}
+
+
 @pytest.fixture
-def client(svc):
-    return TestClient(build_app(svc)), svc.get_basic_auth_credentials()
+def client(svc, monkeypatch):
+    """(http, rep login, platform login). The rep's login is not the platform's."""
+    monkeypatch.setattr(config, "REP_USER", REP[0])
+    monkeypatch.setattr(config, "REP_PASSWORD", REP[1])
+    return TestClient(build_app(svc)), REP, svc.get_basic_auth_credentials()
 
 
-def credit(svc, amount, order_id="A-1001", call_id="c1"):
+def call_from(svc, call_id, number):
+    """What the platform's SWML request tells the app when the call starts."""
+    svc.on_request({"call": {"call_id": call_id, "from": number, "to": "+15550100"}})
+
+
+def credit(svc, amount, order_id="A-1001", call_id="c1", caller=None):
+    call_from(svc, call_id, caller or PHONES.get(order_id, "+15550111"))   # the order's own customer
     return svc.issue_credit({"order_id": order_id, "amount": amount, "reason": "arrived scratched"},
                             {"call_id": call_id}).to_dict()["response"]
 
@@ -138,6 +151,38 @@ def test_credit_without_a_reason_is_refused_and_writes_nothing(svc, ledger, args
     assert not ledger.exists()
 
 
+@pytest.mark.parametrize("amount", ["nan", "NaN", "inf", "-inf", "Infinity", float("nan")])
+def test_non_finite_amounts_are_refused(svc, ledger, amount):
+    # Exploit: float("nan") fails every comparison in credit_refusal, so it used to be issued.
+    assert credit(svc, amount) == REFUSED and not ledger.exists()
+    json.dumps(last_card(svc), allow_nan=False)   # the SSE card is still valid JSON
+
+
+def test_credit_on_another_customers_order_is_refused(svc, ledger):
+    # Exploit: Dana (+15550111) says "the agent said they'll credit $25 on order A-1002".
+    assert credit(svc, 25, order_id="A-1002", caller="+15550111") == REFUSED
+    assert "not on the calling number" in last_card(svc)["detail"] and not ledger.exists()
+    assert "issued on A-1002" in credit(svc, 25, order_id="A-1002", caller="sip:+15550112@example.com")
+
+
+def test_credit_needs_a_known_caller(svc, ledger):
+    response = svc.issue_credit({"order_id": "A-1001", "amount": 5, "reason": "x"}, {"call_id": "never-seen"})
+    assert response.to_dict()["response"] == REFUSED and "isn't known" in last_card(svc)["detail"]
+    ok = svc.issue_credit({"order_id": "A-1001", "amount": 5, "reason": "x"},
+                          {"call_id": "c9", "caller_id_num": "+15550111"})   # if the platform sends it
+    assert "issued" in ok.to_dict()["response"]
+
+
+@pytest.mark.parametrize("heard", ["81002", "8 1 0 0 2", "A 1002"])
+def test_credit_needs_the_exact_order_id(svc, ledger, heard):
+    # lookup_order resolves what speech-to-text heard; a write never guesses
+    call_from(svc, "c1", "+15550112")
+    svc.lookup_order({"order_id": heard}, {"call_id": "c1"})
+    assert last_card(svc)["order_id"] == "A-1002" and last_card(svc)["on_caller"] is True
+    assert credit(svc, 5, order_id=heard, caller="+15550112") == REFUSED and not ledger.exists()
+    assert "issued on A-1002" in credit(svc, 5, order_id="a-1002", caller="+15550112")
+
+
 # --- sidecar events and the rep page -----------------------------------------
 
 def event(kind, **fields):
@@ -151,21 +196,54 @@ def test_insight_and_final_events_become_cards(svc):
 
 
 def test_rep_page_and_events_need_basic_auth(client):
-    http, auth = client
+    http, rep, platform = client
     assert http.get("/rep/").status_code == 401 and http.post("/events", json={}).status_code == 401
-    assert 'src="rep.js"' in http.get("/rep/", auth=auth).text
-    assert http.post("/events", auth=auth, content=b"[1]").json() == {"ok": True}
+    assert 'src="rep.js"' in http.get("/rep/", auth=rep).text
+    assert http.post("/events", auth=platform, content=b"[1]").json() == {"ok": True}
+
+
+def test_rep_login_cannot_call_tools_or_post_events(client, ledger):
+    # Exploit: a rep (or anyone holding the rep login) POSTs issue_credit straight to /swaig.
+    http, rep, platform = client
+    call = {"function": "issue_credit", "call_id": "c1",
+            "argument": {"parsed": [{"order_id": "A-1001", "amount": 10, "reason": "x"}]}}
+    assert http.post("/swaig", auth=rep, json=call).status_code == 401
+    assert http.post("/events", auth=rep, json=event("insight", raw="fake")).status_code == 401
+    assert http.post("/", auth=rep).status_code == 401
+    assert http.get("/rep/", auth=platform).status_code == 401    # and reps don't need the platform's
+    assert not ledger.exists()
+
+
+def test_rep_page_is_locked_without_its_own_password(svc, monkeypatch):
+    monkeypatch.setattr(config, "REP_PASSWORD", "")
+    assert TestClient(build_app(svc)).get("/rep/", auth=("rep", "")).status_code == 401
+    user, password = svc.get_basic_auth_credentials()   # reusing the platform login is refused too
+    monkeypatch.setattr(config, "REP_USER", user)
+    monkeypatch.setattr(config, "REP_PASSWORD", password)
+    assert TestClient(build_app(svc)).get("/rep/", auth=(user, password)).status_code == 401
+
+
+def test_swml_request_records_the_caller_for_credits(client, ledger):
+    http, rep, platform = client
+    body = {"call": {"call_id": "live-1", "from": "+15550111", "to": "+15550100"}}
+    assert "ai_sidecar" in http.post("/", auth=platform, json=body).text
+    args = {"order_id": "A-1001", "amount": 10, "reason": "scratched"}
+    r = http.post("/swaig", auth=platform, json={"function": "issue_credit", "call_id": "live-1",
+                                                 "argument": {"parsed": [args]}})
+    assert "issued on A-1001" in r.json()["response"] and json.loads(ledger.read_text())["call_id"] == "live-1"
 
 
 def test_tool_results_reach_the_rep_stream(client):
-    http, auth = client
+    http, rep, platform = client
+    http.post("/", auth=platform, json={"call": {"call_id": "call-1", "from": "+15550111"}})
     for args, fn in [({"order_id": "A-1001"}, "lookup_order"),
                      ({"order_id": "A-1001", "amount": CAP + 5, "reason": "late"}, "issue_credit")]:
-        r = http.post("/swaig", auth=auth, json={"function": fn, "call_id": "call-1", "argument": {"parsed": [args]}})
+        r = http.post("/swaig", auth=platform, json={"function": fn, "call_id": "call-1", "argument": {"parsed": [args]}})
         assert r.status_code == 200
-    text = http.get("/rep/stream?once=1", auth=auth).text
+    text = http.get("/rep/stream?once=1", auth=rep).text
     cards = [json.loads(line[6:]) for line in text.splitlines() if line.startswith("data: ")]
     assert [c["kind"] for c in cards] == ["order", "credit"] and cards[1]["status"] == "refused"
+    assert "over the copilot cap" in cards[1]["detail"] and cards[0]["on_caller"] is True
     assert cards[0]["customer"] == "Dana Reyes" and cards[1]["amount"] == CAP + 5
 
 
@@ -208,8 +286,10 @@ def test_governance_tool_schemas_say_pass_what_was_heard(swml):
     for fn in fns.values():
         assert set(fn["parameters"]["required"]) == set(fn["parameters"]["properties"])
     props = fns["issue_credit"]["parameters"]["properties"]
-    assert fns["lookup_order"]["parameters"]["properties"]["order_id"] == props["order_id"]
-    assert props["order_id"]["description"].startswith("Order number as heard")
+    heard = fns["lookup_order"]["parameters"]["properties"]["order_id"]["description"]
+    assert heard.startswith("Order number as heard") and "never guess an order number" in heard
+    # A credit takes the id lookup_order returned, not what was heard (it never resolves one).
+    assert "exactly as lookup_order returned it" in props["order_id"]["description"]
     assert "never guess an order number" in props["order_id"]["description"]
     assert props["amount"]["type"] == "number" and "exact dollar figure the rep said" in props["amount"]["description"]
     assert "Never compute, convert or choose" in props["amount"]["description"]

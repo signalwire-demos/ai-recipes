@@ -22,7 +22,8 @@ function render(card) {
     box = el("article", "card order");
     box.append(el("h2", "", card.found ? `Order ${card.order_id}` : `Order ${card.order_id} not found`));
     if (card.found) {
-      box.append(fields([["Customer", card.customer], ["Phone", card.phone], ["Status", card.status],
+      box.append(fields([["Customer", card.customer], ["Phone", card.phone],
+        ["Calling number", card.on_caller ? "matches this order" : "does not match: no credit"], ["Status", card.status],
         ["Items", card.items.join(", ")], ["Total", card.total.toFixed(2)], ["ETA", card.eta], ["Notes", card.notes]]));
     }
   } else if (card.kind === "credit") {
