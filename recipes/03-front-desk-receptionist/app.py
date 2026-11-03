@@ -41,6 +41,14 @@ def refunded_ids() -> set:
     return {json.loads(line)["invoice_id"] for line in config.REFUNDS_FILE.read_text().splitlines() if line}
 
 
+# Tool-schema enums come from the same files the handlers read, built once at import so the
+# decorators below can use them. The invoice pattern is the canonical form the model should
+# send; invoice_key() still normalizes whatever speech recognition hands over.
+PLANS = list(load(config.PLANS_FILE))
+SERVICES = list(load(config.STATUS_FILE))
+INVOICE_PATTERN = "^(INV-)?[0-9]{4}$"
+
+
 class FrontDeskAgent(AgentBase):
     def __init__(self, **kwargs):
         super().__init__(name="front-desk", route=config.ROUTE, port=config.PORT, **kwargs)
@@ -74,7 +82,9 @@ class FrontDeskAgent(AgentBase):
         name="get_plan_price",
         description="Get the monthly price and speed of an internet plan.",
         parameters={"type": "object",
-                    "properties": {"plan": {"type": "string", "description": "basic, plus or gigabit"}},
+                    "properties": {"plan": {
+                        "type": "string", "enum": PLANS,
+                        "description": "Which plan the caller is asking about. Ask if not provided."}},
                     "required": ["plan"]},
     )
     def get_plan_price(self, args, raw_data):
@@ -90,7 +100,9 @@ class FrontDeskAgent(AgentBase):
         name="check_service_status",
         description="Check whether a service has a known outage.",
         parameters={"type": "object",
-                    "properties": {"service": {"type": "string", "description": "internet, tv or phone"}},
+                    "properties": {"service": {
+                        "type": "string", "enum": SERVICES,
+                        "description": "Which service the caller is asking about. Ask if not provided."}},
                     "required": ["service"]},
     )
     def check_service_status(self, args, raw_data):
@@ -107,7 +119,10 @@ class FrontDeskAgent(AgentBase):
         name="open_ticket",
         description="Open a support ticket with a one-sentence summary of the problem.",
         parameters={"type": "object",
-                    "properties": {"summary": {"type": "string", "description": "What is wrong"}},
+                    "properties": {"summary": {
+                        "type": "string",
+                        "description": "One-sentence summary of the problem in the caller's own words. "
+                                       "Ask the caller to describe the problem if they have not."}},
                     "required": ["summary"]},
     )
     def open_ticket(self, args, raw_data):
@@ -124,7 +139,10 @@ class FrontDeskAgent(AgentBase):
         name="get_invoice",
         description="Look up an invoice by its number, for example INV-1001.",
         parameters={"type": "object",
-                    "properties": {"invoice_id": {"type": "string", "description": "Invoice number"}},
+                    "properties": {"invoice_id": {
+                        "type": "string", "pattern": INVOICE_PATTERN,
+                        "description": "The caller's invoice number, normalized to INV-#### (for example "
+                                       "INV-1001). Ask for it if not provided."}},
                     "required": ["invoice_id"]},
     )
     def get_invoice(self, args, raw_data):
@@ -139,7 +157,10 @@ class FrontDeskAgent(AgentBase):
         name="issue_refund",
         description="Refund an invoice in full. Only call after the caller confirms.",
         parameters={"type": "object",
-                    "properties": {"invoice_id": {"type": "string", "description": "Invoice number"}},
+                    "properties": {"invoice_id": {
+                        "type": "string", "pattern": INVOICE_PATTERN,
+                        "description": "Invoice number already looked up with get_invoice, as INV-#### "
+                                       "(for example INV-1001). Ask if not provided."}},
                     "required": ["invoice_id"]},
     )
     def issue_refund(self, args, raw_data):

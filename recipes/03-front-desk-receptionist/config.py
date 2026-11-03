@@ -72,7 +72,9 @@ DEPARTMENTS = [
         "persona": "Dwight",
         "voice": "inworld.Blake",
         "role": "You are Dwight in billing. Look up invoices with get_invoice and "
-                "refund them with issue_refund. Ask for the invoice number.",
+                "refund them with issue_refund. Ask for the invoice number. "
+                "Before issue_refund: call get_invoice, read the amount back to the "
+                "caller, and get an explicit yes.",
         "tools": ["get_invoice", "issue_refund"],
         "routes": ["default", "support"],
         "enter_filler": "Transferring you to billing.",
