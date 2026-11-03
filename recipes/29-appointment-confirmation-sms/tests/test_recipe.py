@@ -1,6 +1,7 @@
 """Handler tests (direct calls, assert on FunctionResult actions), the inbound SMS webhook
 (laml_webhooks form POST), dynamic config, and governance assertions on the dumped SWML."""
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -78,6 +79,15 @@ def test_book_rejects_a_taken_slot(agent):
     assert actions(result) == [] and "taken" in result.to_dict()["response"]
 
 
+@pytest.mark.parametrize("name_arg", [{}, {"name": ""}, {"name": "   "}])
+def test_book_without_a_name_asks_and_writes_nothing(agent, name_arg):
+    # name is in the schema's required list, but the platform doesn't enforce that: the handler does.
+    # Before this guard a nameless call saved {"name": ""} and texted the caller.
+    result = agent.book_appointment({**name_arg, "date": "2026-11-04", "time": "11:00"}, CALLER)
+    assert actions(result) == [] and "name" in result.to_dict()["response"].lower()
+    assert load_bookings() == SEED
+
+
 # --- reschedule_appointment -----------------------------------------------------
 
 def test_reschedule_moves_the_preloaded_booking_and_texts(agent):
@@ -87,6 +97,15 @@ def test_reschedule_moves_the_preloaded_booking_and_texts(agent):
     sms = sms_verb(acts)
     assert sms["to_number"] == "+15550142" and "13:00" in sms["body"] and "AC-1001" in sms["body"]
     assert find(acts, "change_step") == ["confirmed"]
+
+
+def test_reschedule_refuses_the_current_slot(agent):
+    # slot_problem(keep=...) exempts the booking's own slot, so without this check a no-op
+    # reschedule was accepted and still texted the caller.
+    raw = {"global_data": {"caller": "+15550142", "booking": SEED[0]}}
+    result = agent.reschedule_appointment({"date": "2026-11-03", "time": "09:00"}, raw)
+    assert actions(result) == [] and "current slot" in result.to_dict()["response"]
+    assert load_bookings() == SEED
 
 
 def test_reschedule_without_a_preloaded_booking_changes_nothing(agent):
@@ -169,10 +188,15 @@ def swaig_test_bin() -> str:
 
 
 @pytest.fixture(scope="module")
-def steps():
+def swml():
     out = subprocess.run([swaig_test_bin(), str(RECIPE / "app.py"), "--dump-swml", "--raw"],
                          capture_output=True, text=True, check=True, cwd=RECIPE).stdout
-    return {s["name"]: s for s in ai_of(json.loads(out))["prompt"]["contexts"]["default"]["steps"]}
+    return json.loads(out)
+
+
+@pytest.fixture(scope="module")
+def steps(swml):
+    return {s["name"]: s for s in ai_of(swml)["prompt"]["contexts"]["default"]["steps"]}
 
 
 def test_governance_each_step_has_exactly_its_tool(steps):
@@ -184,6 +208,26 @@ def test_governance_each_step_has_exactly_its_tool(steps):
 def test_governance_model_cannot_navigate_between_steps(steps):
     # no next_step tool: a new caller can't wander into reschedule, only handlers move the call
     assert steps["book"]["valid_steps"] == [] and steps["reschedule"]["valid_steps"] == []
+
+
+def test_governance_tool_schemas_are_typed_and_ask(swml):
+    fns = {f["function"]: f["parameters"] for f in ai_of(swml)["SWAIG"]["functions"]}
+    assert set(fns) == {"book_appointment", "reschedule_appointment"}
+    assert set(fns["book_appointment"]["properties"]) == {"name", "date", "time"}
+    for name, params in fns.items():
+        props = params["properties"]
+        assert set(params["required"]) == set(props), name
+        assert props["date"]["format"] == "date"
+        pattern = props["time"]["pattern"]
+        assert re.fullmatch(pattern, "09:00") and not re.fullmatch(pattern, "9:00")  # the handler needs HH:MM
+        for field, prop in props.items():
+            assert "ask" in prop["description"].lower(), f"{name}.{field}: the description must tell the model to ask"
+
+
+def test_governance_steps_collect_one_value_at_a_time(steps):
+    assert steps["book"]["text"].startswith("Ask for, one at a time:")
+    assert "never assume the date is today" in steps["book"]["text"]
+    assert "one at a time" in steps["reschedule"]["text"] and "current slot" in steps["reschedule"]["text"]
 
 
 def test_governance_confirmed_is_terminal(steps):
