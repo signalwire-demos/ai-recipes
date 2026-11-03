@@ -16,6 +16,7 @@ import pytest
 os.environ["MCP_TOKEN"] = "voice-agent-test-token"
 os.environ["MCP_ADMIN_TOKEN"] = "admin-test-token"
 os.environ["MCP_URL"] = "https://calendar.example.com/mcp"
+os.environ["MCP_CALLER_KEY"] = "caller-test-key"   # shared with the swaig-test subprocesses
 
 RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
@@ -26,10 +27,13 @@ from starlette.testclient import TestClient  # noqa: E402
 
 VOICE = {"Authorization": "Bearer voice-agent-test-token"}
 ADMIN = {"Authorization": "Bearer admin-test-token"}
+DANA = {**VOICE, **mcp_calendar.caller_headers("+15550142")}    # the per-call headers the agent renders
+SAM = {**VOICE, **mcp_calendar.caller_headers("+15550143")}
+PRIYA = {**VOICE, **mcp_calendar.caller_headers("+15550177")}
 DAY = "2030-01-07"  # a Monday
 SEED = [
-    {"id": "M-1001", "title": "Cleaning", "start": f"{DAY} 10:00", "attendee": "Dana Rivera"},
-    {"id": "M-1002", "title": "Checkup", "start": f"{DAY} 11:00", "attendee": "Sam Okafor"},
+    {"id": "M-1001", "title": "Cleaning", "start": f"{DAY} 10:00", "attendee": "Dana Rivera", "phone": "+15550142"},
+    {"id": "M-1002", "title": "Checkup", "start": f"{DAY} 11:00", "attendee": "Sam Okafor", "phone": "+15550143"},
 ]
 
 
@@ -97,9 +101,10 @@ def swaig_of(swml_doc):
 
 
 def test_swml_points_the_platform_at_the_mcp_server(swml):
-    assert swaig_of(swml)["mcp_servers"] == [
-        {"url": "https://calendar.example.com/mcp", "headers": VOICE}
-    ]
+    [entry] = swaig_of(swml)["mcp_servers"]
+    assert entry["url"] == "https://calendar.example.com/mcp"
+    assert entry["headers"]["Authorization"] == VOICE["Authorization"]
+    assert mcp_calendar.verified_caller({k.lower(): v for k, v in entry["headers"].items()})  # signed caller ID
 
 
 def test_swml_carries_no_calendar_code(swml):
@@ -130,9 +135,9 @@ def dump_swml(env_overrides):
 def test_default_mcp_url_is_the_agent_public_url():
     # MCP_URL unset: one tunnel covers both, so the SWML points at PUBLIC_URL + /mcp-calendar.
     doc = dump_swml({"MCP_URL": "", "PUBLIC_URL": "https://agent.example.com/"})
-    assert swaig_of(doc)["mcp_servers"] == [
-        {"url": "https://agent.example.com/mcp-calendar", "headers": VOICE}
-    ]
+    [entry] = swaig_of(doc)["mcp_servers"]
+    assert entry["url"] == "https://agent.example.com/mcp-calendar"
+    assert entry["headers"]["Authorization"] == VOICE["Authorization"]
 
 
 @pytest.fixture
@@ -169,14 +174,15 @@ def test_same_app_still_serves_swml_behind_basic_auth(same_app):
 # --- reference server: book and move round trip -----------------------------
 
 def test_book_and_move_round_trip(server):
-    booked = text(call(server, "book_meeting", {"title": "Whitening", "start": f"{DAY} 14:00", "attendee": "Priya Shah"}))
+    booked = text(call(server, "book_meeting", {"title": "Whitening", "start": f"{DAY} 14:00", "attendee": "Priya Shah"},
+                       PRIYA))
     assert booked.startswith("Booked M-1003")
     assert "14:00" not in text(call(server, "find_free_slots", {"date": DAY}))
-    moved = text(call(server, "move_meeting", {"meeting_id": "m-1003", "new_start": f"{DAY} 15:30"}))
+    moved = text(call(server, "move_meeting", {"meeting_id": "m-1003", "new_start": f"{DAY} 15:30"}, PRIYA))
     assert moved == f"Moved M-1003 (Whitening) to {DAY} 15:30."
     free = text(call(server, "find_free_slots", {"date": DAY}))
     assert "14:00" in free and "15:30" not in free
-    assert "M-1003: Whitening at 2030-01-07 15:30" in text(call(server, "find_my_meetings", {"attendee": "priya shah"}))
+    assert text(call(server, "find_my_meetings", {}, PRIYA)) == "M-1003: Whitening at 2030-01-07 15:30"
 
 
 @pytest.mark.parametrize("args, expect", [
@@ -190,7 +196,69 @@ def test_book_rejections(server, args, expect):
 
 
 def test_move_unknown_meeting(server):
-    assert text(call(server, "move_meeting", {"meeting_id": "M-9", "new_start": f"{DAY} 12:00"})) == "No meeting M-9."
+    reply = text(call(server, "move_meeting", {"meeting_id": "M-9", "new_start": f"{DAY} 12:00"}, DANA))
+    assert reply == "No meeting M-9 for this caller."
+
+
+# --- caller binding: the server, not the model, decides whose meetings these are --
+
+def test_find_my_meetings_ignores_the_name_the_caller_gives(server):
+    # Sam says he's Dana. The server goes by the signed caller ID, not the argument.
+    reply = text(call(server, "find_my_meetings", {"attendee": "Dana Rivera"}, SAM))
+    assert reply == f"M-1002: Checkup at {DAY} 11:00" and "M-1001" not in reply
+
+
+def test_move_someone_elses_meeting_is_refused(server):
+    reply = text(call(server, "move_meeting", {"meeting_id": "M-1001", "new_start": f"{DAY} 15:00"}, SAM))
+    assert reply == "No meeting M-1001 for this caller."  # same answer as a missing id: nothing leaks
+    assert f"M-1001: Cleaning at {DAY} 10:00" in text(call(server, "find_my_meetings", {}, DANA))
+    assert text(call(server, "move_meeting", {"meeting_id": "M-1001", "new_start": f"{DAY} 15:00"}, DANA)) \
+        == f"Moved M-1001 (Cleaning) to {DAY} 15:00."
+
+
+@pytest.mark.parametrize("headers", [
+    VOICE,                                                              # no caller at all
+    {**VOICE, "X-Caller": "+15550142"},                                 # unsigned
+    {**VOICE, "X-Caller": "+15550142", "X-Caller-Sig": "0" * 64},       # forged signature
+    {**VOICE, "X-Caller": "+15550142", "X-Caller-Sig": SAM["X-Caller-Sig"]},   # Sam's signature, Dana's number
+])
+def test_unverified_caller_gets_no_meetings(server, headers):
+    assert "no verified caller" in text(call(server, "find_my_meetings", {}, headers))
+    moved = text(call(server, "move_meeting", {"meeting_id": "M-1001", "new_start": f"{DAY} 15:00"}, headers))
+    assert moved == "No meeting M-1001 for this caller."
+
+
+def test_each_call_gets_its_own_signed_caller(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "SERVE_REFERENCE_CALENDAR", False)
+    agent = CalendarAgent()
+    client, auth = TestClient(agent.get_app()), agent.get_basic_auth_credentials()[:2]
+
+    def entry(caller):
+        doc = client.post("/", json={"call": {"call_id": caller, "from": caller}}, auth=auth).json()
+        [server] = swaig_of(doc)["mcp_servers"]
+        return {k.lower(): v for k, v in server["headers"].items()}
+    dana, sam = entry("+15550142"), entry("+15550143")
+    assert mcp_calendar.verified_caller(dana) == "+15550142" and mcp_calendar.verified_caller(sam) == "+15550143"
+    assert dana["authorization"] == sam["authorization"] == VOICE["Authorization"]
+
+
+# --- the bearer token: no well-known default ------------------------------------
+
+def test_placeholder_or_blank_token_is_never_accepted():
+    scopes = {"change-me-calendar-token": ["find_free_slots"], "": ["find_free_slots"]}
+    client = TestClient(mcp_calendar.create_app(mcp_calendar.Calendar(SEED), scopes))
+    for header in ({"Authorization": "Bearer change-me-calendar-token"}, {"Authorization": "Bearer "}, {}):
+        assert rpc(client, "tools/list", headers=header).status_code == 401
+
+
+@pytest.mark.parametrize("script", ["app.py", "mcp_calendar.py"])
+@pytest.mark.parametrize("token", ["", "change-me-calendar-token"])
+def test_refuses_to_start_without_a_real_token(script, token):
+    env = {**os.environ, "MCP_TOKEN": token}
+    run = subprocess.run([sys.executable, str(RECIPE / script)], capture_output=True, text=True,
+                         cwd=RECIPE, env=env, timeout=60)
+    assert run.returncode != 0 and "Set MCP_TOKEN" in run.stderr
 
 
 def test_bad_arguments_are_a_tool_error(server):
@@ -216,7 +284,7 @@ def test_governance_voice_agent_cannot_cancel(server):
     assert "cancel_meeting" not in names
     reply = call(server, "cancel_meeting", {"meeting_id": "M-1001"})
     assert reply["error"]["code"] == -32602
-    assert "M-1001" in text(call(server, "find_my_meetings", {"attendee": "Dana Rivera"}))
+    assert "M-1001" in text(call(server, "find_my_meetings", {}, DANA))
 
 
 def test_governance_admin_scope_can_cancel(server):
@@ -246,7 +314,7 @@ def test_governance_calendar_tool_schemas_are_typed_and_ask(server):
     assert re.fullmatch(props[("move_meeting", "meeting_id")]["pattern"], "M-1001")
     assert props[("move_meeting", "meeting_id")] == props[("cancel_meeting", "meeting_id")]
     # The same attendee wording on book and lookup: the server matches the name exactly (lowercased).
-    assert props[("book_meeting", "attendee")] == props[("find_my_meetings", "attendee")]
+    assert not [k for k in props if k[0] == "find_my_meetings"]   # the caller comes from the signed headers
     for (name, key), prop in props.items():
         if key != "meeting_id":  # comes from find_my_meetings, not from the caller
             assert "ask" in prop["description"].lower(), f"{name}.{key}: the description must tell the model to ask"
@@ -255,4 +323,4 @@ def test_governance_calendar_tool_schemas_are_typed_and_ask(server):
 def test_governance_free_slots_hide_other_peoples_meetings(server):
     free = text(call(server, "find_free_slots", {"date": DAY}))
     assert "10:00" not in free and "Dana" not in free and "Cleaning" not in free
-    assert "Dana" not in text(call(server, "find_my_meetings", {"attendee": "Sam Okafor"}))
+    assert "Cleaning" not in text(call(server, "find_my_meetings", {}, SAM))

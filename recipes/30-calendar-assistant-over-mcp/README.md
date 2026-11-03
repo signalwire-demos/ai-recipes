@@ -35,8 +35,15 @@ Bringing MCP tools onto a live call, and deciding in code which ones the phone a
   one more reason to give it the narrowest scope that works.
 - The server holds the rules and the data. Slot checks (weekdays, office hours, 30-minute
   marks, no double booking, nothing in the past) run in the server. `find_free_slots` returns
-  times only, never whose meeting is in the way, and `find_my_meetings` returns only the named
-  attendee's meetings.
+  times only, never whose meeting is in the way.
+- The server, not the model, knows who is calling. Each meeting belongs to a caller ID. The
+  agent's dynamic config (`per_call_mcp`) renders this call's MCP entry with the caller's
+  number and an HMAC of it (`X-Caller`, `X-Caller-Sig`, key `MCP_CALLER_KEY`).
+  `find_my_meetings` takes no arguments and lists only that number's meetings, and
+  `move_meeting` refuses any meeting id that isn't the caller's, with the same answer as an
+  unknown id. A caller who says "I'm Dana Rivera" from another phone gets nothing of Dana's.
+  Caller ID is the identity here, so it is only as strong as the caller ID the call arrives
+  with. An external MCP server ignores these headers unless it checks them the same way.
 - The prompt's "Rules" section tells the model which tool to use when (find, offer, then book
   or move). The SDK can't scope MCP tools per step: `set_functions()` refuses any name that
   isn't a locally registered tool. So the hard limits are the ones above, set by the token
@@ -57,22 +64,24 @@ sequenceDiagram
     participant A as app.py (agent, /)
     participant M as mcp_calendar.py (same app, /mcp-calendar)
     SW->>A: POST / (fetch SWML)
-    A-->>SW: SWML with SWAIG.mcp_servers = [MCP_URL + Bearer MCP_TOKEN]
+    A-->>SW: SWML with SWAIG.mcp_servers = [MCP_URL + Bearer MCP_TOKEN + signed X-Caller]
     SW->>M: initialize, tools/list (Bearer MCP_TOKEN)
     M-->>SW: find_free_slots, find_my_meetings, book_meeting, move_meeting
     Note over M: cancel_meeting is outside this token's scope: not listed, not callable
     C->>SW: "Move my cleaning to Thursday afternoon"
     SW->>A: get_today (SWAIG webhook)
     SW->>M: find_my_meetings, find_free_slots, move_meeting (tools/call)
+    Note over M: only meetings owned by the signed X-Caller are listed or moved
     M-->>SW: "Moved M-1001 (Cleaning) to ... 14:00."
     SW-->>C: reads back the new time
 ```
 
 | Primitive | Where |
 |---|---|
-| `add_mcp_server(url, headers)` | `app.py`, `CalendarAgent.__init__` |
+| `add_mcp_server(url, headers)` | `app.py`, `CalendarAgent.per_call_mcp` |
 | Reference MCP server mounted in the agent | `app.py`, `self.mount(mcp_calendar.create_router(...), prefix=config.MCP_CALENDAR_PATH)` |
 | Token scopes (`MCP_SCOPES`) | `config.py`; enforced in `mcp_calendar.py`, `create_router` |
+| Per-call MCP headers (`set_dynamic_config_callback`) | `app.py`, `per_call_mcp`; checked by `mcp_calendar.verified_caller` |
 | Server-side slot rules | `mcp_calendar.py`, `Calendar._check_slot` |
 | Local SWAIG tool with a loop guard | `app.py`, `get_today` (`toggle_functions` after `GET_TODAY_MAX_CALLS`) |
 
@@ -96,13 +105,19 @@ cp .env.example .env
 
 In `.env`, fill in the `SIGNALWIRE_*` keys, basic auth and `PUBLIC_URL` (your tunnel), then:
 
-- `MCP_TOKEN`: any long random string, e.g. `python -c "import secrets; print(secrets.token_urlsafe(24))"`.
-  The agent sends it, and the reference server accepts it with the voice scope.
+- `MCP_TOKEN` (required): any long random string, e.g.
+  `python -c "import secrets; print(secrets.token_urlsafe(24))"`. The agent sends it, and the
+  reference server accepts it with the voice scope. There is no default: `app.py` refuses to
+  start while it is blank or the old `change-me-calendar-token` placeholder, and the server
+  never accepts either.
 - `MCP_URL`: leave it unset to use the built-in reference calendar at `PUBLIC_URL/mcp-calendar`.
   Set it only for an external calendar MCP server (a public HTTPS URL). Setting it switches
   the built-in calendar off, unless you also set `SERVE_REFERENCE_CALENDAR=true`.
 - `MCP_ADMIN_TOKEN` (optional): a second token whose scope adds `cancel_meeting`, for your own
   tools. Leave it blank to switch the admin scope off.
+- `MCP_CALLER_KEY` (optional): the key for the signed caller ID. Blank means a random key per
+  process, which is all the built-in calendar needs. Set it, to the same value in both, when
+  the reference server runs as its own process.
 
 ## Run locally
 
@@ -113,8 +128,9 @@ ngrok http 3000                    # terminal 2: put this URL in PUBLIC_URL, res
 
 The agent logs a warning at startup if `MCP_URL` is `localhost` (`PUBLIC_URL` unset), because
 SignalWire can't reach that. In the SignalWire Dashboard, set the number's call handler to
-`https://USER:PASS@<agent-tunnel>/`, call it, say you're Dana Rivera, and ask to move your
-cleaning to the afternoon. Each calendar tool call the platform makes shows up in the app log
+`https://USER:PASS@<agent-tunnel>/`. Meetings belong to a caller ID, so first put the phone
+you'll call from in `SEED_MEETINGS` in `config.py` (in place of Dana's `+15550142`). Call, and
+ask to move your cleaning to the afternoon. Each calendar tool call the platform makes shows up in the app log
 as `POST /mcp-calendar` and a `mcp tools/call ...` line. The server seeds Dana's cleaning (10:00) and Sam Okafor's checkup
 (11:00) on the next business day each time it starts, and it forgets every change when it
 stops.
@@ -126,9 +142,9 @@ T="Authorization: Bearer $(grep ^MCP_TOKEN= .env | cut -d= -f2)"
 curl -s localhost:3000/mcp-calendar -H "$T" -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq '.result.tools[].name'
 curl -s localhost:3000/mcp-calendar -H "$T" -H 'content-type: application/json' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_my_meetings","arguments":{"attendee":"Dana Rivera"}}}'
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"find_free_slots","arguments":{"date":"2030-01-07"}}}'
 swaig-test app.py --dump-swml --raw | jq '.sections.main[-1].ai.SWAIG.mcp_servers'
-pytest -q                          # SWML, discovery as the platform does it, same-app route, book/move, scopes, guard
+pytest -q                          # SWML, discovery, same-app route, book/move, scopes, caller binding, guard
 ```
 
 ## Deploy
@@ -141,8 +157,8 @@ The service reads `.env`. Publish it behind HTTPS (for example `https://agent.ex
 set `PUBLIC_URL` to that, and point the number at `https://USER:PASS@agent.example.com/`.
 The platform then reaches the calendar at `https://agent.example.com/mcp-calendar` with the
 bearer token. That route uses token auth, not basic auth. To run the reference server on its
-own host instead, run `python mcp_calendar.py` (it serves `POST /mcp` on `MCP_PORT`) and set
-`MCP_URL` to its public URL. The reference server keeps everything in
+own host instead, run `python mcp_calendar.py` (it serves `POST /mcp` on `MCP_PORT`; it needs
+`MCP_TOKEN` and `MCP_CALLER_KEY`) and set `MCP_URL` to its public URL. The reference server keeps everything in
 memory, so a restart resets the calendar. For anything real, use your own calendar MCP server.
 
 ## What to change first
@@ -155,6 +171,6 @@ Open `config.py`:
 - `GET_TODAY_MAX_CALLS`: how many `get_today` calls one call gets before the agent says the
   calendar is unavailable.
 - `MCP_SCOPES`, `OFFICE_HOURS`, `SLOT_MINUTES`, `SEED_MEETINGS`: the reference server's scopes and
-  booking rules, if you keep it.
+  booking rules, if you keep it. Each seed meeting's `phone` is the caller ID that owns it.
 - `BUSINESS_NAME` and `VOICE`, and the "Rules" section in `app.py` if your MCP server's tool
   names differ.
