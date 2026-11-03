@@ -23,7 +23,7 @@ def curated_step_text() -> str:
     """The only order facts the model sees: ${global_data.order.<field>} for curated fields."""
     facts = " ".join(f"{label}: ${{global_data.order.{field}}}." for field, label in config.CURATED_FIELDS.items())
     return (f"The caller is verified. Their order: {facts} Answer questions about this order only. "
-            "If they want a refund, call request_refund. When they are done, move to wrap_up.")
+            "If they want a refund, ask why, then call request_refund. When they are done, move to wrap_up.")
 
 
 def refund_decision(order: dict) -> bool:
@@ -46,8 +46,8 @@ class OrderStatusAgent(AgentBase):
 
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("verify_identity") \
-            .set_text("Greet the caller. Ask for their order number and the ZIP code it ships to, then "
-                      "call verify_identity. Don't discuss any order before that.") \
+            .set_text("Greet the caller. Ask, one at a time, for their order number and then the ZIP code "
+                      "it ships to, then call verify_identity. Don't discuss any order before that.") \
             .set_functions(["verify_identity"]) \
             .set_valid_steps([])  # no next_step tool: only the handler opens the order
         ctx.add_step("order_status") \
@@ -72,8 +72,12 @@ class OrderStatusAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "order_number": {"type": "string", "description": "The order number, digits only"},
-                "postal_code": {"type": "string", "description": "Five-digit shipping ZIP code"},
+                "order_number": {"type": "string", "pattern": r"^\d+$",
+                                 "description": "The order number as the caller reads it, digits only, "
+                                                "e.g. 100234. Ask if not provided."},
+                "postal_code": {"type": "string", "pattern": r"^\d{5}$",
+                                "description": "The five-digit ZIP code the order ships to, digits only, "
+                                               "e.g. 74012. Ask if not provided."},
             },
             "required": ["order_number", "postal_code"],
         },
@@ -106,7 +110,11 @@ class OrderStatusAgent(AgentBase):
         description="Ask for a refund on the caller's verified order.",
         parameters={
             "type": "object",
-            "properties": {"reason": {"type": "string", "description": "Why the caller wants a refund"}},
+            "properties": {
+                "reason": {"type": "string",
+                           "description": "The caller's own reason for the refund, in their words. "
+                                          "Ask if not provided."},
+            },
             "required": ["reason"],
         },
     )
@@ -115,8 +123,11 @@ class OrderStatusAgent(AgentBase):
         order = gd.get("order")
         if not gd.get("verified") or not order:
             return FunctionResult("The caller is not verified.")
+        reason = str(args.get("reason", "")).strip()
+        if not reason:  # required: never credit (or write) a refund with no stated reason
+            return FunctionResult("Ask the caller why they want the refund, then call request_refund again.")
         if refund_decision(order):
-            ref = crm.issue_credit(order["id"], order["total"], str(args.get("reason", "")).strip())
+            ref = crm.issue_credit(order["id"], order["total"], reason)
             return FunctionResult(
                 f"A credit of ${order['total']:,.2f} has been issued to the original payment method, "
                 f"reference {ref}. Tell the caller it shows up in three to five business days."
