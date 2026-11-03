@@ -98,8 +98,8 @@ class StockQuoteSkill(SkillBase):
                          "enum": list(PROVIDERS), "required": False, "env_var": "MARKET_DATA_PROVIDER"},
             "api_key": {"type": "string", "description": "Market data API key (not needed for mock)",
                         "required": False, "hidden": True, "env_var": "MARKET_DATA_API_KEY"},
-            "watchlist": {"type": "array", "description": "If set, only these tickers can be quoted",
-                          "default": [], "required": False},
+            "watchlist": {"type": "array", "items": {"type": "string"}, "default": [], "required": False,
+                          "description": "If set, only these tickers can be quoted"},
             "mock_file": {"type": "string", "description": "JSON quote feed for the mock provider",
                           "required": False},
             "timeout": {"type": "number", "description": "Provider timeout in seconds", "default": 5,
@@ -122,11 +122,24 @@ class StockQuoteSkill(SkillBase):
     def get_instance_key(self) -> str:
         return f"{self.SKILL_NAME}_{self.params.get('tool_name') or 'get_stock_quote'}"
 
+    def ticker_schema(self) -> dict:
+        """The shape the handler accepts (TICKER); a watchlist becomes the enum, so no other ticker is sent."""
+        ticker = {"type": "string", "pattern": TICKER.pattern,
+                  "description": "Stock ticker symbol in capital letters, 1 to 6 letters, as the caller said or "
+                                 "spelled it, e.g. ACME. If they gave only a company name, ask them to spell the "
+                                 "ticker; never guess it."}
+        if self.watchlist:
+            ticker["enum"] = self.watchlist
+            ticker["description"] = (f"Stock ticker symbol in capital letters, one of: {', '.join(self.watchlist)}. "
+                                     "Pass it exactly, whatever the caller calls the company; ask which one only if "
+                                     "more than one could fit. Never guess another symbol.")
+        return ticker
+
     def register_tools(self) -> None:
         self.define_tool(
             name=self.tool_name,
             description="Get the latest price and today's change for one stock ticker symbol.",
-            parameters={"ticker": {"type": "string", "description": "Ticker symbol, e.g. ACME"}},
+            parameters={"ticker": self.ticker_schema()},
             required=["ticker"],
             handler=self.quote,
             fillers={"en-US": ["Let me check that price.", "One moment while I pull that up."]},
@@ -152,6 +165,9 @@ class StockQuoteSkill(SkillBase):
         return ["ticker", "stock", "quote", *self.watchlist]
 
     def _get_prompt_sections(self):
-        return [{"title": "Stock quotes",
-                 "body": f"When the caller asks for a share price, call {self.tool_name} with the ticker symbol. "
-                         "Read the result as given. Never guess a price."}]
+        body = (f"When the caller asks for a share price, call {self.tool_name} with the ticker symbol. "
+                "Read the result as given. Never guess a price.")
+        if self.watchlist:
+            body += (f" This line quotes only {', '.join(self.watchlist)}; always pass that ticker exactly, "
+                     "whatever the caller calls the company.")
+        return [{"title": "Stock quotes", "body": body}]
