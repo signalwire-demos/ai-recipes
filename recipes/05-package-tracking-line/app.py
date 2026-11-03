@@ -11,6 +11,9 @@ from signalwire import AgentBase, DataMap, FunctionResult
 import config
 
 
+TRACKING_NUMBER_PATTERN = "^[0-9]+$"   # digits only: a space would be URL-encoded into a 404
+
+
 def build_track_package() -> DataMap:
     headers = {"Accept": "application/json"}
     if config.TRACKING_API_KEY:
@@ -19,12 +22,21 @@ def build_track_package() -> DataMap:
         DataMap("track_package")
         .purpose("Get the delivery status for one tracking number.")
         .parameter("tracking_number", "string",
-                   "The tracking number, digits only, no spaces or dashes", required=True)
+                   "The caller's tracking number, digits only, no spaces or dashes. "
+                   "Ask the caller if they don't provide it.", required=True)
         .webhook("GET", config.TRACKING_URL, headers=headers)
         .error_keys(["error"])                 # a JSON {"error": ...} counts as a failure
         .output(FunctionResult(config.OUTPUT_TEMPLATE))
         .fallback_output(FunctionResult(config.NOT_FOUND_TEMPLATE))  # 404, timeout, error
     )
+
+
+def track_package_function() -> dict:
+    """The SWAIG function dict this agent ships. DataMap.parameter() has no pattern
+    kwarg, so the digits-only pattern is set on the dict after to_swaig_function()."""
+    fn = build_track_package().to_swaig_function()
+    fn["parameters"]["properties"]["tracking_number"]["pattern"] = TRACKING_NUMBER_PATTERN
+    return fn
 
 
 class TrackingAgent(AgentBase):
@@ -41,7 +53,7 @@ class TrackingAgent(AgentBase):
                 "Offer to look up another number, then say goodbye.",
             ],
         )
-        self.register_swaig_function(build_track_package().to_swaig_function())
+        self.register_swaig_function(track_package_function())
 
 
 agent = TrackingAgent()
