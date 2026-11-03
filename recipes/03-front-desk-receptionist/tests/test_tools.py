@@ -11,7 +11,7 @@ RECIPE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RECIPE))
 
 import config  # noqa: E402
-from app import FrontDeskAgent  # noqa: E402
+from app import FrontDeskAgent, load  # noqa: E402
 
 DEPTS = {d["name"]: d for d in config.DEPARTMENTS}
 ALL_TOOLS = {t for d in config.DEPARTMENTS for t in d["tools"]}
@@ -100,6 +100,15 @@ def test_refund_already_refunded_or_missing(agent):
     assert not config.REFUNDS_FILE.exists()
 
 
+# --- every tool: a missing required argument asks and writes nothing --------
+
+@pytest.mark.parametrize("tool", sorted(ALL_TOOLS))
+def test_missing_required_arg_asks_and_writes_nothing(agent, tool):
+    result = getattr(agent, tool)({}, {"call_id": "c0"})
+    assert result.to_dict().get("action", []) == []   # no step or context change
+    assert not config.TICKETS_FILE.exists() and not config.REFUNDS_FILE.exists()
+
+
 # --- governance: read the SWML exactly as swaig-test dumps it ---------------
 
 def swaig_test_bin() -> str:
@@ -155,3 +164,21 @@ def test_governance_departments_are_isolated_with_own_voice(ai):
         assert voices[f"English-{dept['persona']}"] == dept["voice"]
         assert any(f"English-{dept['persona']}" in s["body"] for s in ctx["pom"])
     assert len(set(voices.values())) == len(DEPTS)
+
+
+def test_governance_tool_schemas_are_typed_and_ask(ai):
+    params = {f["function"]: f["parameters"] for f in ai["SWAIG"]["functions"]}
+    assert params["get_plan_price"]["properties"]["plan"]["enum"] == list(load(config.PLANS_FILE))
+    assert params["check_service_status"]["properties"]["service"]["enum"] == list(load(config.STATUS_FILE))
+    for tool in ("get_invoice", "issue_refund"):
+        assert params[tool]["properties"]["invoice_id"]["pattern"] == "^(INV-)?[0-9]{4}$"
+    for tool, p in params.items():
+        assert set(p["required"]) == set(p["properties"]), tool
+        for name, prop in p["properties"].items():
+            assert "ask" in prop["description"].lower(), f"{tool}.{name}: the description must tell the model to ask"
+
+
+def test_governance_billing_role_requires_lookup_and_yes_before_refund(ai):
+    role = next(s["body"] for s in ai["prompt"]["contexts"]["billing"]["pom"] if s["title"] == "Role")
+    assert "Before issue_refund: call get_invoice" in role
+    assert "read the amount back" in role and "explicit yes" in role
