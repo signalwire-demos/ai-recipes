@@ -45,7 +45,9 @@ class LatencyLabAgent(AgentBase):
         )
         ctx = self.define_contexts().add_context("default")
         ctx.add_step("answer") \
-            .set_text("Answer questions about opening hours. For any day, call check_hours.") \
+            .set_text("Answer questions about opening hours. When the caller names a day, call "
+                      "check_hours with that day. If they do not name one, ask which day; never "
+                      "assume today.") \
             .set_functions(["check_hours"]) \
             .set_valid_steps([])
         self.set_post_prompt('Return only JSON: {"answered_hours": true|false}')
@@ -56,7 +58,14 @@ class LatencyLabAgent(AgentBase):
         description="Look up opening hours for one day of the week.",
         parameters={
             "type": "object",
-            "properties": {"day": {"type": "string", "description": "Day of the week, e.g. monday"}},
+            "properties": {
+                "day": {
+                    "type": "string",
+                    "description": "Day of the week the caller asked about, lowercase English name "
+                                   "(monday to sunday). Ask if not provided; never assume today.",
+                    "enum": DAYS,  # built from the same list the handler checks
+                },
+            },
             "required": ["day"],
         },
     )
