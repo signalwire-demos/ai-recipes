@@ -46,7 +46,12 @@ class TemplateAgent(AgentBase):
         parameters={
             "type": "object",
             "properties": {
-                "day": {"type": "string", "description": "Day of the week, e.g. monday"},
+                "day": {
+                    "type": "string",
+                    "description": "Day of the week the caller wants to visit, lowercase English "
+                                   "name (monday to sunday). Ask if not provided; never assume today.",
+                    "enum": DAYS,  # built from the same list the handler checks
+                },
             },
             "required": ["day"],
         },
