@@ -108,6 +108,31 @@ def test_other_orders_transfer_without_revealing_why(agent, order_number, postal
     assert not config.CREDITS_FILE.exists()
 
 
+def test_second_refund_on_the_same_call_is_refused(agent):
+    gd = verified_gd(agent, "100235", "74012")
+    first = agent.request_refund({"reason": "late"}, {"global_data": gd})
+    gd = {**gd, **find(actions(first), "set_global_data")[0]}       # what the platform carries forward
+    again = agent.request_refund({"reason": "still late"}, {"global_data": gd})
+    assert "already handled" in again.to_dict()["response"] and find(actions(again), "set_global_data") == []
+    assert len(config.CREDITS_FILE.read_text().splitlines()) == 1
+
+
+def test_refund_on_a_new_call_is_deduped_by_the_crm(agent):
+    agent.request_refund({"reason": "late"}, {"global_data": verified_gd(agent, "100235", "74012")})
+    again = agent.request_refund({"reason": "late"}, {"global_data": verified_gd(agent, "100235", "74012")})
+    assert "already credited, reference CR-0001" in again.to_dict()["response"]
+    assert len(config.CREDITS_FILE.read_text().splitlines()) == 1
+
+
+def test_parallel_credits_write_one_row():
+    import crm
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(lambda _: crm.issue_credit("ORD-0102", 24.0, "late"), range(16)))
+    assert sum(created for _, created in results) == 1 and {ref for ref, _ in results} == {"CR-0001"}
+    assert len(config.CREDITS_FILE.read_text().splitlines()) == 1
+
+
 def test_refund_requires_verification(agent):
     assert agent.request_refund({"reason": "x"}, {}).to_dict()["response"] == "The caller is not verified."
 
