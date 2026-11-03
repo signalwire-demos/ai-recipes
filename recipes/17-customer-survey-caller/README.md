@@ -16,11 +16,13 @@ same survey for testing.
 Building a known archetype from a prefab in an afternoon. `SurveyAgent` from
 `signalwire.prefabs` brings the survey prompt, speech hints, a static greeting, a post-prompt
 summary and two tools (`validate_response`, `log_response`). The whole survey is configuration in
-`config.py`. The recipe adds governance in two places. It overrides `log_response` so the handler,
-not the model, decides what gets recorded: a rating out of range, an option that isn't on the
-list or a "maybe" to a yes/no is refused, and nothing is written. And the customer id comes from
-the dial URL through the dynamic config callback, so the model never picks whose row an answer
-belongs to. The report is computed from the handler-validated rows, not from the model's summary.
+`config.py`. The recipe adds governance in two places. It overrides both tools with one shared
+schema (question ids as an enum from `config.QUESTIONS`, both parameters required) so the handler,
+not the model, decides what counts as an answer and what gets recorded: a rating out of range, an
+option that isn't on the list or a "maybe" to a yes/no is refused, and nothing is written. And the
+customer id comes from the dial URL through the dynamic config callback, so the model never picks
+whose row an answer belongs to. The report is computed from the handler-validated rows, not from
+the model's summary.
 
 ```mermaid
 stateDiagram-v2
@@ -36,7 +38,7 @@ stateDiagram-v2
 | Primitive | Where |
 |---|---|
 | `SurveyAgent(survey_name, questions, ...)` | `app.py`, `SurveyCaller.__init__`, questions from `config.QUESTIONS` |
-| Overridden `log_response` tool | `app.py`, normalizes and validates before writing |
+| Overridden `validate_response` and `log_response` tools | `app.py`, one shared schema; both normalize and check, `log_response` writes |
 | `set_dynamic_config_callback` + `update_global_data` | `app.py`, `per_call` puts `?customer=` into `global_data` |
 | REST `calling.dial(from_, to, url)` | `call_customer.py` |
 | NPS scoring rule | `score_results.py`, thresholds in `config.py` |
@@ -87,7 +89,8 @@ replied. The caller said "Eleven", and the agent asked for a number from 1 to 10
 `score_results.py` scored them. The live calls found one bug, now fixed: the model sends ratings
 as words, and the handler's `int()` refused "nine" as "not a number" until the caller gave up
 (call `46145b42-c87c-4370-a439-1463b9a9a476`). `spoken_number()` now reads digits or number
-words, so "eleven" is still out of range.
+words, so "eleven" is still out of range, and `validate_response` is overridden to use the same
+check, so the two tools can't disagree.
 
 Without a phone:
 

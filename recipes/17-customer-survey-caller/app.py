@@ -3,10 +3,11 @@
 The prefab brings the survey prompt, hints, a post-prompt summary and two tools
 (validate_response, log_response). This recipe adds two things on top:
 
-1. log_response is overridden so the handler, not the model, decides what gets
-   recorded: the answer is normalized and checked against the question (rating in
-   range, option on the list, yes or no). Invalid answers are refused and never
-   written. Valid ones are appended to data/results.jsonl.
+1. Both tools are overridden, with one shared schema, so the handler, not the
+   model, decides what counts as an answer and what gets recorded: the answer is
+   normalized and checked against the question (rating in range, as digits or
+   words; option on the list; yes or no). Invalid answers are refused and never
+   written. Valid ones are appended to data/results.jsonl by log_response.
 2. The customer id comes from the dial URL (?customer=) via dynamic config, so
    the model never chooses whose survey a row belongs to.
 """
@@ -70,6 +71,30 @@ def normalize(question: dict, response) -> tuple:
     return str(response or "").strip(), None
 
 
+# One schema for both tools, so validate_response and log_response agree on the answer. The
+# question ids are the same config.QUESTIONS the handlers check; both fields are required.
+ANSWER_PARAMS = {
+    "type": "object",
+    "properties": {
+        "question_id": {
+            "type": "string",
+            "description": "ID of the question just answered, from the Survey Questions list.",
+            "enum": [q["id"] for q in config.QUESTIONS],
+        },
+        "response": {
+            "type": "string",
+            "description": (
+                "The caller's answer exactly as spoken: for a rating the number (digits or "
+                "words), for multiple choice one of the listed options, for yes/no 'yes' or "
+                "'no', otherwise their words; empty string if they decline an optional "
+                "question. Never fill this in yourself; ask if the caller has not answered."
+            ),
+        },
+    },
+    "required": ["question_id", "response"],
+}
+
+
 class SurveyCaller(SurveyAgent):
     def __init__(self, **kwargs):
         super().__init__(
@@ -98,20 +123,42 @@ class SurveyCaller(SurveyAgent):
         if re.match(config.CUSTOMER_ID_PATTERN, customer_id):
             agent.update_global_data({"customer_id": customer_id})
 
-    @AgentBase.tool(
-        name="log_response",
-        description="Record the caller's answer to one survey question.",
-        parameters={
-            "question_id": {"type": "string", "description": "The ID of the question"},
-            "response": {"type": "string", "description": "The caller's answer"},
-        },
-    )
-    def log_response(self, args, raw_data):
+    def _answer(self, args) -> tuple:
+        """The question and answer the tool args name, or (None, None, what to ask for)."""
         question = next((q for q in self.questions if q["id"] == args.get("question_id")), None)
         if question is None:
             ids = ", ".join(q["id"] for q in self.questions)
-            return FunctionResult(f"Unknown question. Use one of: {ids}.")
-        value, error = normalize(question, args.get("response"))
+            return None, None, f"Unknown question. Use one of: {ids}."
+        if args.get("response") is None:
+            return None, None, f"No answer was given. Ask the caller: {question['text']}"
+        return question, args["response"], None
+
+    @AgentBase.tool(
+        name="validate_response",
+        description="Check the caller's answer to one survey question before recording it.",
+        parameters=ANSWER_PARAMS,
+    )
+    def validate_response(self, args, raw_data):
+        # The prefab's version int()-parses ratings, so "nine" was invalid here and valid in
+        # log_response (call 46145b42). Same schema, same normalize(): the two tools agree.
+        question, response, error = self._answer(args)
+        if error:
+            return FunctionResult(error)
+        value, error = normalize(question, response)
+        if error:
+            return FunctionResult(f"Not valid. {error}")
+        return FunctionResult(f"Valid: {question['id']} = {value}. Call log_response with the answer.")
+
+    @AgentBase.tool(
+        name="log_response",
+        description="Record the caller's answer to one survey question.",
+        parameters=ANSWER_PARAMS,
+    )
+    def log_response(self, args, raw_data):
+        question, response, error = self._answer(args)
+        if error:
+            return FunctionResult(error)
+        value, error = normalize(question, response)
         if error:
             return FunctionResult(f"Not recorded. {error}")
         row = {
